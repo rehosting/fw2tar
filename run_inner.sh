@@ -19,7 +19,7 @@ if [[ ! -z "${POTENTIAL_DIRS}" ]]; then
 	echo "Selecting $FIRST_ROOT as it matched $FIRST_COUNT critera"
 	ROOT_DIR=$FIRST_ROOT
 
-	tar cfz /data/output/${ROOT_DIR##*/}.tar.gz -C ${ROOT_DIR} .
+	tar cfz /data/output/${1}.tar.gz -C ${ROOT_DIR} .
 
 else
 	echo "FAILURE: no root directory found"
