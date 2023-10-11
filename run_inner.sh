@@ -1,10 +1,19 @@
 #!/bin/bash
 
+set -e
+
 unblob $@
 
 # Newest file with a name that unblob could've made
 #MOST_RECENT_FILE=$(find . -name "*_extract*" -type d -printf "%T@ %p\n" | sort -nr | awk '{print $2}' | head -n1)
-MOST_RECENT_FILE="$(basename "${1}_extract")"
+set -o pipefail
+MOST_RECENT_FILE="$(basename "${1}_extract")" || (echo "Failed to take basename of \"${1}\""; exit 1)
+set +o pipefail
+
+if [[ ! -d "$MOST_RECENT_FILE" ]]; then
+  echo "Missing extraction ${1}_extract"
+  exit 1
+fi
 
 # Search in there for the rootfs
 POTENTIAL_DIRS=$(find $MOST_RECENT_FILE -type d \( -name "bin" -o -name "boot" -o -name "dev" -name "etc" -o -name "home" -o -name "lib" -o -name "media" -o -name "mnt" -o -name "opt" -o -name "proc" -o -name "root" -o -name "sbin" -o -name "sys" -o -name "tmp" -o -name "usr" -o -name "var" \) -exec dirname {} \; | sort | uniq -c |  awk '{ print length, $0 }' | sort -n -s | cut -d" " -f2- | sort -rg)
