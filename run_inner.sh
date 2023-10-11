@@ -26,8 +26,8 @@ if [[ ! -z "${POTENTIAL_DIRS}" ]]; then
 	FIRST_COUNT=$(echo "$FIRST_DIR" | awk '{print $1}')
 	FIRST_ROOT="$(echo "$FIRST_DIR" | xargs echo -n | cut -d ' ' -f 2-)" # This is gross. Trim leading whitespace with xargs, then take everything after first space
 
-	echo "Selecting $FIRST_ROOT as it matched $FIRST_COUNT critera"
-	tar cfz "/data/output/${OUTBASE}.tar.gz" -C "${FIRST_ROOT}" .
+	echo "Selecting $FIRST_ROOT as it matched $FIRST_COUNT critera. Writing out to /data/output/${OUTBASE}.tar.gz"
+	tar cfz -dev "/data/output/${OUTBASE}.tar.gz" -C "${FIRST_ROOT}" .
 
 else
 	echo "FAILURE: no root directory found"
