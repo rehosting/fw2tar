@@ -1,13 +1,59 @@
-Singularity Unblob 
+Rootfs tarball generator with Unblob 
 ---
 
-Scripts to run unblob in a singularity container.
+This repository contains a simple container to extract
+and tar a linux root filesystem using unblob.
 
-Clone repo and build with `./make_container.sh`, then you should get a .sif file in your current directory. Copy that to the environment where you'd like to run it.
+It also includes scripts to build this container as singularity so
+it can run in an unprivileged environment.
 
-Run the singularity container with the following (and put your input in ./input)
+### Docker
+#### Build container
+Clone this repo and `cd` into its root then run
+
+```sh
+docker build -t unblob .
 ```
-mkdir input output
-singularity exec -B $(pwd)/input:/data/input,$(pwd)/output:/data/output myunblob.sif /unblob/run.sh /data/input/your_fw.bin
+
+#### Run container
+Run the docker container with the following (and put your input in the share directory)
+```sh
+mkdir share
+docker run --rm -it \
+	-v $(pwd)/share:/share \
+	/share/your_fw.bin
 ```
 
+
+
+### Singularity
+#### Build container
+Clone this repo and `cd` into its root.
+
+Build `unblob.sif` with `./make_container.sh`, or by running
+
+```sh
+docker build -t unblob .
+
+docker run -v /var/run/docker.sock:/var/run/docker.sock \
+	-v $(pwd):/output \
+	--privileged \
+	-t --rm \
+	quay.io/singularity/docker2singularity unblob
+
+mv unblob*.sif unblob.sif
+```
+
+Copy that to the environment where you'd like to run it.
+
+#### Run container
+Run the singularity container with the following (and put your input in the share directory)
+```
+mkdir share
+singularity exec \
+	-B $(pwd)/input:/data/share \
+	myunblob.sif \
+	/unblob/run.sh /share/your_fw.bin
+```
+
+Your filesystem will be created at `/share/your_fw.tar.gz`
