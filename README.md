@@ -21,6 +21,7 @@ Run the docker container with the following (and put your input in the share dir
 mkdir share
 docker run --rm -it \
 	-v $(pwd)/share:/share \
+	unblob \
 	/share/your_fw.bin
 ```
 
@@ -51,7 +52,7 @@ Run the singularity container with the following (and put your input in the shar
 ```
 mkdir share
 singularity exec \
-	-B $(pwd)/input:/data/share \
+	-B $(pwd)/share:/share \
 	myunblob.sif \
 	/unblob/run.sh /share/your_fw.bin
 ```
