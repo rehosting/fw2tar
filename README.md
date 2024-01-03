@@ -37,10 +37,9 @@ Build `unblob.sif` with `./make_container.sh`, or by running
 docker build -t unblob .
 
 docker run -v /var/run/docker.sock:/var/run/docker.sock \
-	-v $(pwd):/output \
-	--privileged \
-	-t --rm \
-	quay.io/singularity/docker2singularity unblob
+    -v $(pwd):/output \
+    --privileged  -t \
+    --rm quay.io/singularity/docker2singularity:v3.9.0 unblob
 
 mv unblob*.sif unblob.sif
 ```
