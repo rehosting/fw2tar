@@ -86,9 +86,15 @@ FIRST_ROOT="$(echo "$FIRST_DIR" | xargs echo -n | cut -d ' ' -f 2-)" # This is g
 # Second pass: re-extract with a depth limit to avoid extracting within our target rootfs
 # We could find and rm -rf anything named _extracted in our root. But what if an original file had that name?
 # Instead we'll just re-extract with a depth limit that's set to the depth of our target rootfs
-DEPTH=$(echo "$FIRST_ROOT" | tr -cd '/' | wc -c)
-SCRATCHDEPTH=$(echo "$SCRATCHDIR/initial" | tr -cd '/' | wc -c)
-DEPTH=$((DEPTH - SCRATCHDEPTH - 1))
+# Note depth refers to the number of extractions, not the depth of the filesystem.
+
+# Let's find the number of extractions we need to do
+# Now we want to drop the prefix of "$SCRATCHDIR/initial"
+# and find the number of _extract strings in the path.
+# These paths are generated based on user's path and filesystem
+# types so it's unlikely they'll have an extra _extract.
+REL_PATH=$(echo "$FIRST_ROOT" | sed "s|${SCRATCHDIR}/initial||g")
+DEPTH=$(echo "${REL_PATH}/" | grep -o "_extract/" | wc -l)
 
 unblob --extract-dir="${SCRATCHDIR}/final" -d $DEPTH "$INFILE"
 
