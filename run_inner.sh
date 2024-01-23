@@ -17,90 +17,44 @@ if [ $# -lt 1 ]; then
     usage
 fi
 
-# Assigning first argument to INFILE
-INFILE=$1
+INFILE="$1"
 
-# If we have a second argument ...
-if [ $# -gt 1 ]; then
-	OUTFILE="$2"
-
-	# Create log file name by replacing .tar.gz with .log
-	LOGFILE="${OUTFILE%.*}.log"
-
-	# If it doesn't end with .tar.gz, add it
-	if [[ ! "$OUTFILE" =~ \.tar\.gz$ ]]; then
-		OUTFILE="${OUTFILE}.tar.gz"
-	fi
-
+if [ $# -lt 2 ]; then
+    # If we  don't have 2 args, set OUTFILE to basename of INFILE + .tar.gz
+    # Strip any suffix on INFILE before we add .tar.gz
+    OUTFILE="${INFILE%.*}.tar.gz"
 else
- 	# No argument, rewrite INFILE to have .tar.gz suffix
-	OUTFILE="${INFILE%.*}.tar.gz"
-	LOGFILE="${INFILE%.*}.log"
+    OUTFILE="$2"
 fi
 
-# If outfile is infile, error
-if [ "$INFILE" = "$OUTFILE" ]; then
-	echo "ERROR: INFILE and OUTFILE are the same"
-	usage
-fi
-
-if [ $# -gt 2 ]; then
+# If we don't have 3 args, set SCRATCHDIR to /tmp
+if [ $# -lt 3 ]; then
+	SCRATCHDIR="/tmp/"
+else
 	SCRATCHDIR="$3"
-else
-	# No argument, use /tmp
-	SCRATCHDIR=/tmp/
 fi
 
+# Create our unblob + binwalk output file paths
+OUTFILE_BASE="${OUTFILE%.tar.gz}"
+UNBLOB_OUT="${OUTFILE_BASE}.unblob.tar.gz"
+BINWALK_OUT="${OUTFILE_BASE}.binwalk.tar.gz"
 
-# Newest file with a name that unblob could've made
-#MOST_RECENT_FILE=$(find . -name "*_extract*" -type d -printf "%T@ %p\n" | sort -nr | awk '{print $2}' | head -n1)
-set -o pipefail
-EXTRACTNAME="$(basename "${INFILE}_extract")" || (echo "Failed to take basename of \"${1}\""; exit 1)
-set +o pipefail
+echo "Running with INFILE=$INFILE OUTFILE=$OUTFILE SCRATCHDIR=$SCRATCHDIR"
+echo "UNBLOB_OUT=$UNBLOB_OUT BINWALK_OUT=$BINWALK_OUT"
 
-mkdir -p "${SCRATCHDIR}/initial"
+# TODO: we want to run these in parallel
+# We'll do this by adding an & to the end of each command
+# Then we'll wait for them to finish with wait.
+# To get the PID of each command, we'll use $! after the command
 
-unblob --log "${LOGFILE}.txt" --extract-dir="${SCRATCHDIR}/initial" "$INFILE"
-#unblob --extract-dir="${SCRATCHDIR}/initial" "$INFILE"
+fakeroot /extract/run_unblob.sh $INFILE $UNBLOB_OUT $SCRATCHDIR &
+UNBLOB_PID=$!
+fakeroot /extract/run_binwalk.sh $INFILE $BINWALK_OUT $SCRATCHDIR &
+BINWALK_PID=$!
 
-# Search in there for the rootfs
-POTENTIAL_DIRS=$(find "${SCRATCHDIR}/initial/"*_extract -type d \( -name "bin" -o -name "boot" -o -name "dev" -name "etc" -o -name "home" -o -name "lib" -o -name "media" -o -name "mnt" -o -name "opt" -o -name "proc" -o -name "root" -o -name "sbin" -o -name "sys" -o -name "tmp" -o -name "usr" -o -name "var" \) -exec dirname {} \; | sort | uniq -c |  awk '{ print length, $0 }' | sort -n -s | cut -d" " -f2- | sort -rg)
+# Now we wait for both to finish
+wait $UNBLOB_PID
+wait $BINWALK_PID
 
-# If we found at least one, let's grab it
-if [[ -z "${POTENTIAL_DIRS}" ]]; then
-	echo "FAILURE: no root directory found"
-	exit 1
-fi
-
-# count dirname. Let's just grab the most likely
-FIRST_DIR=$(echo -e "$POTENTIAL_DIRS" | head -n1)
-FIRST_COUNT=$(echo "$FIRST_DIR" | awk '{print $1}')
-FIRST_ROOT="$(echo "$FIRST_DIR" | xargs echo -n | cut -d ' ' -f 2-)" # This is gross. Trim leading whitespace with xargs, then take everything after first space
-
-# If you're wondering why we do 2 extractions, uncomment this and look at the extra files we're keeping out of our final tarball
-#echo "Extra extractions: INITIAL_DIR=${FIRST_ROOT}"
-#find "${FIRST_ROOT}" -name "*_extract"
-#echo "Selecting $FIRST_ROOT as it matched $FIRST_COUNT critera. Writing out to /data/output/${OUTFILE}.tar.gz"
-#tar czf "/data/output/${OUTFILE}.tar.gz" --xattrs -C "${FIRST_ROOT}" .
-
-# Second pass: re-extract with a depth limit to avoid extracting within our target rootfs
-# We could find and rm -rf anything named _extracted in our root. But what if an original file had that name?
-# Instead we'll just re-extract with a depth limit that's set to the depth of our target rootfs
-# Note depth refers to the number of extractions, not the depth of the filesystem.
-
-# Let's find the number of extractions we need to do
-# Now we want to drop the prefix of "$SCRATCHDIR/initial"
-# and find the number of _extract strings in the path.
-# These paths are generated based on user's path and filesystem
-# types so it's unlikely they'll have an extra _extract.
-REL_PATH=$(echo "$FIRST_ROOT" | sed "s|${SCRATCHDIR}/initial||g")
-DEPTH=$(echo "${REL_PATH}/" | grep -o "_extract/" | wc -l)
-
-unblob --extract-dir="${SCRATCHDIR}/final" -d $DEPTH "$INFILE"
-
-# Now we want to tar up FIRST_DIR, but instead of being at /initial, it's at /final
-FINAL_DIR=$(echo "$FIRST_ROOT" | sed "s|${SCRATCHDIR}/initial|${SCRATCHDIR}/final|g")
-
-# Warn on any _extract dirs. But our root dir is named _extract, so ignore that first one
-find "${FINAL_DIR}/" -name "*_extract" -exec echo "WARNING: found _extract file in final dir: {}" \; | tail -n -1
-tar czf "${OUTFILE}" --xattrs -C "${FINAL_DIR}" .
+# Now compare (TODO)
+# We examine the two outputs and put the best one at $OUTFILE
