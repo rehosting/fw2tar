@@ -1,48 +1,92 @@
-FROM python:3.8-slim
+FROM ubuntu:22.04
 
 # Install unblob dependencies, curl, and fakeroot
+ENV DEBIAN_FRONTEND=noninteractive
+ENV TZ=America/New_York
+ENV LC_ALL=C.UTF-8
+ENV LANG=C.UTF-8
+
 RUN apt-get update && \
-  apt-get install -y \
+  apt-get install -q -y \
     android-sdk-libsparse-utils \
+    arj \
+    automake \
+    build-essential \
+    bzip2 \
+    cabextract \
+    cpio \
+    cramfsswap \
     curl \
+    default-jdk \
     e2fsprogs \
     fakeroot \
+    git \
+    gzip \
+    lhasa \
+    libarchive-dev \
+    liblzma-dev \
     liblzo2-dev \
     libmagic1 \
-    p7zip-full \
-    unar \
-    zlib1g-dev
-
-# Install rust (with curl), upgrade pip
-RUN curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y
-RUN pip install --upgrade pip
-#RUN PATH="$PATH:$HOME/.cargo/bin" pip install unblob
-# Install sasquatch
-RUN curl -L -o sasquatch_1.0_amd64.deb https://github.com/onekey-sec/sasquatch/releases/download/sasquatch-v4.5.1-4/sasquatch_1.0_amd64.deb && dpkg -i sasquatch_1.0_amd64.deb && rm sasquatch_1.0_amd64.deb
-
-RUN apt-get update && \
-  apt-get install -y \
-    git \
+    locales \
     lz4 \
     lziprecover \
     lzop \
+    mtd-utils \
+    p7zip \
+    p7zip-full \
+    python3 \
+    python3-pip \
+    qtbase5-dev \
+    sleuthkit \
+    squashfs-tools \
+    srecord \
+    tar \
+    unar \
+    unrar-free \
+    unzip \
+    zlib1g-dev \
     zstd
 
-# Install poetry but disable venv
-RUN python3 -m pip install poetry && poetry config virtualenvs.create false
+RUN curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y
+
+# Install dependencies. Note python-lzo needs to be installed after others for some reason
+RUN pip install --upgrade pip && \
+    python3 -m pip install \
+      git+http://github.com/jrspruitt/ubi_reader.git@v0.8.5-master \
+      git+https://github.com/AndrewFasano/binwalk.git \
+      git+https://github.com/ahupp/python-magic \
+      git+https://github.com/devttys0/yaffshiv.git \
+      git+https://github.com/marin-m/vmlinux-to-elf \
+      jefferson \
+      gnupg \
+      poetry \
+      psycopg2-binary \
+      pycryptodome \
+      pylzma \
+      pyyaml \
+      setuptools \
+      sqlalchemy \
+      telnetlib3 \
+      tk \
+      lz4 \
+      zstandard \
+      pyelftools \
+      lief && \
+    python3 -m pip install python-lzo==1.14 && \
+    poetry config virtualenvs.create false
+
+# Install sasquatch from unblob's 
+RUN curl -L -o sasquatch_1.0_amd64.deb https://github.com/onekey-sec/sasquatch/releases/download/sasquatch-v4.5.1-4/sasquatch_1.0_amd64.deb && \
+    dpkg -i sasquatch_1.0_amd64.deb && \
+    rm sasquatch_1.0_amd64.deb
 
 # Clone unblob then install with poetry
-RUN git clone https://github.com/onekey-sec/unblob.git /unblob
+#RUN git clone --depth=1 https://github.com/AndrewFasano/unblob.git /unblob
+RUN git clone --depth=1 https://github.com/onekey-sec/unblob.git /unblob
 RUN cd /unblob && poetry install --no-dev
-RUN unblob --help
 
-COPY run.sh run_inner.sh /unblob/
+RUN git clone --quiet --depth=1 http://github.com/panda-re/genext2fs.git /tmp/genext2fs && \
+  cd /tmp/genext2fs && ./autogen.sh && ./configure --enable-libarchive && make && make install && \
+  rm -rf /tmp/genext2fs
 
-# Input/ouput directories
-RUN mkdir -p /data/input /data/output
-
-# Set the working directory to '/data/output'
-WORKDIR /data/output
-
-# Set the entry point to our unblob wrapper
-ENTRYPOINT ["/unblob/run.sh"]
+COPY run_inner.sh run_binwalk.sh run_unblob.sh /extract/
