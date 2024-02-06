@@ -35,46 +35,35 @@ FIRST_DIR=$(echo -e "$POTENTIAL_DIRS" | head -n1)
 FIRST_COUNT=$(echo "$FIRST_DIR" | awk '{print $1}')
 FIRST_ROOT="$(echo "$FIRST_DIR" | xargs echo -n | cut -d ' ' -f 2-)" # This is gross. Trim leading whitespace with xargs, then take everything after first space
 
-# Let's identify root fileystem, it will be in dirname FIRST_ROOT and named FIRST_ROOT with the trailing _extract removed
+echo "First root is $FIRST_ROOT"
+#
+## Pull rootfs name out of debug log with extract command
 ROOTFS_DIR=$(dirname "$FIRST_ROOT")
 ROOTFS_NAME=$(basename "$FIRST_ROOT" | sed 's/_extract//g')
-
-# If you're wondering how many extra files are in the extracted rootfs at this point, uncomment this:
-#find "${FIRST_ROOT}" -name "*_extract"
-
-# We don't like these files since they wouldn't be in a real rootfs so we'll do a clean extraction
-# configured to avoid recursing within the rootfs
-
-# New approach: In the parent of the rootfs we expect to see an unextracted file of some type.
-# Let's binwalk that directly with a depth of 1.
-
-# We expect to have a file named ROOTFS_NAME in ROOTFS_DIR
-unblob --extract-dir="${SCRATCHDIR}/unblob_final" -d 1 "$ROOTFS_DIR/$ROOTFS_NAME"
+#EXTRACT_CMD=$(grep -o "Running extract command.*${ROOTFS_NAME}" "${LOGBASE}.unblob.txt" | head -n1)
+## This line will contain command=... - grab that
+#EXTRACT_CMD=$(echo "$EXTRACT_CMD" | sed 's/.*command=//g')
+#echo "FINAL EXTRACT COMMAND: $EXTRACT_CMD"
+#
+## Now we'll change the extract command by swapping the output
+## to a tempfile - we'll replace FIRST_ROOT with our own name
+## and then run the command
+#echo ""
+#echo "Replace $ROOTFS_DIR/$ROOTFS_NAME with ${SCRATCHDIR}/unblob_final"
+#echo ""
+#
+#EXTRACT_CMD=$(echo "$EXTRACT_CMD" | sed "s|${ROOTFS_DIR}/${ROOTFS_NAME}|${SCRATCHDIR}/unblob_final|g")
+#echo "FINAL EXTRACT COMMAND: $EXTRACT_CMD"
+#eval $EXTRACT_CMD
 # There should be a single directory in scratchdir / unblob_final - that's our final dir
-FINAL_DIR="${SCRATCHDIR}/unblob_final/$(ls "${SCRATCHDIR}/unblob_final")"
+#FINAL_DIR="${SCRATCHDIR}/unblob_final/$(ls "${SCRATCHDIR}/unblob_final")"
 
-# OLD APPROACH: do a 2nd extraction with a depth limited based on the number of '_extract' strings in the path to the rootfs
-# This ran into issues where the depth argument didn't cleanly map onto the number of _extract directories. Not sure why
-# Also it was probably slower.
-#
-## Second pass: re-extract with a depth limit to avoid extracting within our target rootfs
-## We could find and rm -rf anything named _extracted in our root. But what if an original file had that name?
-## Instead we'll just re-extract with a depth limit that's set to the depth of our target rootfs
-## Note depth refers to the number of extractions, not the depth of the filesystem.
-#
-## Let's find the number of extractions we need to do
-## Now we want to drop the prefix of "$SCRATCHDIR/unblob_initial"
-## and find the number of _extract strings in the path.
-## These paths are generated based on user's path and filesystem
-## types so it's unlikely they'll have an extra _extract.
-#REL_PATH=$(echo "$FIRST_ROOT" | sed "s|${SCRATCHDIR}/unblob_initial||g")
-#DEPTH=$(echo "${REL_PATH}/" | grep -o "_extract/" | wc -l)
-#
-#unblob --extract-dir="${SCRATCHDIR}/unblob_final" -d $DEPTH "$INFILE"
+# Double extract is too complicated. Just delete the _extract dirs and compress that
+mkdir -p "${SCRATCHDIR}/unblob_final"
+mv "${FIRST_ROOT}" "${SCRATCHDIR}/unblob_final"
 
-# Now we want to tar up FIRST_DIR, but instead of being at /unblob_initial, it's at /final
-#FINAL_DIR=$(echo "$FIRST_ROOT" | sed "s|${SCRATCHDIR}/unblob_initial|${SCRATCHDIR}/unblob_final|g")
+# We have a single directory in unblob_final - that's our final dir
+TARGET=$(ls "${SCRATCHDIR}/unblob_final")
 
-# Warn on any _extract dirs. But our root dir is named _extract, so ignore that first one
-find "${FINAL_DIR}/" -name "*_extract" -exec echo "WARNING: found _extract file in final dir: {}" \; | tail -n -1
-tar czf "${OUTFILE}" --xattrs -C "${FINAL_DIR}" .
+# Tar, but exclude anything with _extract in the name
+tar czf "${OUTFILE}" --xattrs -C "${SCRATCHDIR}/unblob_final/${TARGET}"  --exclude "*_extract" .
