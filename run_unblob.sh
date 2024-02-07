@@ -66,4 +66,4 @@ mv "${FIRST_ROOT}" "${SCRATCHDIR}/unblob_final"
 TARGET=$(ls "${SCRATCHDIR}/unblob_final")
 
 # Tar, but exclude anything with _extract in the name
-tar czf "${OUTFILE}" --xattrs -C "${SCRATCHDIR}/unblob_final/${TARGET}"  --exclude "*_extract" .
+tar czf "${OUTFILE}" --xattrs -C "${SCRATCHDIR}/unblob_final/${TARGET}"  --exclude "*_extract" --exclude "./dev" .

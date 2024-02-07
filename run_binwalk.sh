@@ -46,4 +46,4 @@ FINAL_DIR=$(echo "$FIRST_ROOT" | sed "s|${SCRATCHDIR}/unblob_initial|${SCRATCHDI
 
 # Warn on any _extract dirs. But our root dir is named _extract, so ignore that first one
 find "${FINAL_DIR}/" -name "*_extract" -exec echo "WARNING: found _extract file in final dir: {}" \; | tail -n -1
-tar czf "${OUTFILE}" --xattrs -C "${FINAL_DIR}" .
+tar czf "${OUTFILE}" --xattrs -C "${FINAL_DIR}" --exclude './dev' .
