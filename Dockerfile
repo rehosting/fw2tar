@@ -80,13 +80,13 @@ RUN curl -L -o sasquatch_1.0_amd64.deb https://github.com/onekey-sec/sasquatch/r
     dpkg -i sasquatch_1.0_amd64.deb && \
     rm sasquatch_1.0_amd64.deb
 
-# Clone unblob then install with poetry
-#RUN git clone --depth=1 https://github.com/AndrewFasano/unblob.git /unblob
-RUN git clone --depth=1 https://github.com/onekey-sec/unblob.git /unblob
-RUN cd /unblob && poetry install --no-dev
-
 RUN git clone --quiet --depth=1 http://github.com/panda-re/genext2fs.git /tmp/genext2fs && \
   cd /tmp/genext2fs && ./autogen.sh && ./configure --enable-libarchive && make && make install && \
   rm -rf /tmp/genext2fs
+
+# Clone unblob then install with poetry
+#COPY unblob /unblob
+RUN git clone --depth=1 https://github.com/AndrewFasano/unblob.git /unblob
+RUN cd /unblob && poetry install --no-dev
 
 COPY run_inner.sh run_binwalk.sh run_unblob.sh /extract/
