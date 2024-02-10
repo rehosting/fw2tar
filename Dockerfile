@@ -84,5 +84,5 @@ RUN curl -L -o sasquatch_1.0_amd64.deb https://github.com/onekey-sec/sasquatch/r
 RUN git clone --depth=1 https://github.com/AndrewFasano/unblob.git /unblob
 RUN cd /unblob && poetry install --no-dev
 
-COPY extract.py /extract/
-ENTRYPOINT [ "python3", "/extract/extract.py" ]
+COPY fw2tar.py /
+ENTRYPOINT [ "python3", "/fw2tar.py" ]
