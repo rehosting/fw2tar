@@ -49,7 +49,7 @@ RUN apt-get update && \
 
 RUN curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y
 
-# Install dependencies. Note python-lzo needs to be installed after others for some reason
+# Install dependencies
 RUN pip install --upgrade pip && \
     python3 -m pip install \
       git+http://github.com/jrspruitt/ubi_reader.git@v0.8.5-master \
@@ -80,11 +80,7 @@ RUN curl -L -o sasquatch_1.0_amd64.deb https://github.com/onekey-sec/sasquatch/r
     dpkg -i sasquatch_1.0_amd64.deb && \
     rm sasquatch_1.0_amd64.deb
 
-RUN git clone --quiet --depth=1 http://github.com/panda-re/genext2fs.git /tmp/genext2fs && \
-  cd /tmp/genext2fs && ./autogen.sh && ./configure --enable-libarchive && make && make install && \
-  rm -rf /tmp/genext2fs
-
-# Clone unblob then install with poetry
+# Clone unblob fork then install with poetry
 RUN git clone --depth=1 https://github.com/AndrewFasano/unblob.git /unblob
 RUN cd /unblob && poetry install --no-dev
 
