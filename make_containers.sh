@@ -1,14 +1,14 @@
 #!/bin/bash
 
-rm -f unblob*.sif
+rm -f extract*.sif
 
 echo "1: Building docker container"
-docker build -t unblob .
+docker build -t extract .
 
 echo "2: Converting to singularity"
 docker run -v /var/run/docker.sock:/var/run/docker.sock \
     -v $(pwd):/output \
     --privileged  -t \
-    --rm quay.io/singularity/docker2singularity:v3.9.0 unblob
+    --rm quay.io/singularity/docker2singularity:v3.9.0 extract
 
-mv unblob*.sif unblob.sif
+mv extract*.sif extract.sif

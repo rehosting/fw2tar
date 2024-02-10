@@ -85,8 +85,7 @@ RUN git clone --quiet --depth=1 http://github.com/panda-re/genext2fs.git /tmp/ge
   rm -rf /tmp/genext2fs
 
 # Clone unblob then install with poetry
-#COPY unblob /unblob
 RUN git clone --depth=1 https://github.com/AndrewFasano/unblob.git /unblob
 RUN cd /unblob && poetry install --no-dev
 
-COPY run_inner.sh run_binwalk.sh run_unblob.sh /extract/
+COPY extract.py /extract/
