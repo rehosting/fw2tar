@@ -1,6 +1,7 @@
 #!/bin/bash
+set -eu
 
-rm -f fw2tar*.sif
+rm -f fw2tar*.sif || true
 
 echo "1: Building docker container"
 docker build -t fw2tar .
