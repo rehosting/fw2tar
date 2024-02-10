@@ -50,22 +50,40 @@ def find_linux_filesystems(start_dir):
     ranked_filesystems = sorted(filesystems.values(), key=lambda x: (-x['size'], -x['score']))
     return [(Path(fs['path']), fs['size'], fs['nfiles']) for fs in ranked_filesystems]
 
-def _tar_fs(rootfs_dir, outfile):
-    # Constructing the tar command with exclusions
+def _tar_fs(rootfs_dir, tarbase):
+    # First, define the name of the uncompressed tar archive (temporary name)
+    uncompressed_outfile = tarbase + '.tar'
     tar_command = [
         "tar",
-        "czf", outfile,
-        "--xattrs",
+        "-cf",
+        uncompressed_outfile,
+        "--sort=name",
+        "--owner=root",
+        "--group=root",
+        "--mtime=UTC 2019-01-01",
+        #"--xattrs", # Introduces non-determinism
         "--exclude=*_extract",
-        "--exclude=./dev",
+        "--exclude=squashfs-root",
+        "--exclude=dev",
         "-C", str(rootfs_dir),
-        '.'
+        "."
     ]
 
     # Execute the tar command
-    result = subprocess.run(tar_command, capture_output=True, text=True)
-    if result.returncode != 0:
-        print(f"Error archiving root filesystem {rootfs_dir}: {result.stderr}")
+    tar_result = subprocess.run(tar_command, capture_output=True, text=True)
+    if tar_result.returncode != 0:
+        print(f"Error archiving root filesystem {rootfs_dir}: {tar_result.stderr}")
+        return
+
+    # Now, compress the tar archive using gzip with the --no-name option
+    # Output filename will be tarbase.tar.gz
+    gzip_command = ["gzip", "--no-name", "-f", uncompressed_outfile]
+
+    # Execute the gzip command
+    gzip_result = subprocess.run(gzip_command, capture_output=True, text=True)
+    if gzip_result.returncode != 0:
+        print(f"Error compressing tar archive {uncompressed_outfile}: {gzip_result.stderr}")
+        return
 
 def _extract(extractor, infile, extract_dir, log_file):
     try:
@@ -102,8 +120,8 @@ def extract_and_process(extractor, infile, outfile_base, scratch_dir, start_time
         rootfs_choices = find_linux_filesystems(extract_dir)
 
         for idx, (root, size, nfiles) in enumerate(rootfs_choices):
-            outfile = f"{outfile_base}.{extractor}.{idx}.tar.gz"
-            _tar_fs(root, outfile)
+            tarbase = f"{outfile_base}.{extractor}.{idx}"
+            _tar_fs(root, tarbase)
             post_tar = time.time()
             #print(f"{extractor} filesystem {idx} archived after {post_tar - post_extract:.2f}s")
 
