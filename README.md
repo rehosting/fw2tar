@@ -24,16 +24,30 @@ We express our gratitude to the developers of these tools for their hard work th
 
 ## Usage
 
-### Docker
+### Pre-built docker container
 
-#### Get the container
+#### Download the container
+Download the container from Github
 
-Either pull from github
 ```sh
 docker pull ghcr.io/andrewfasano/fw2tar:main
 ```
 
-Or clone this repo and build from source:
+#### Extract Firmware
+
+```sh
+export INPUT_FILE=/path/to/your/firmware.bin
+docker run --rm -it \
+    -v $(dirname $INPUT_FILE):/host \
+    ghcr.io/andrewfasano/fw2tar:main \
+    /host/$(basename $INPUT_FILE)
+```
+
+The resulting filesystem(s) will be output to `/path/to/your/firmware.{binwalk,unblob}.*.tar.gz`, with each root filesystem extracted to its own archive.
+
+### Docker from source
+
+#### Clone and build the container
 ```sh
 git clone https://github.com/AndrewFasano/fw2tar.git
 docker build -t extract fw2tar
@@ -42,7 +56,7 @@ docker build -t extract fw2tar
 #### Extract Firmware
 
 ```sh
-./fw2tar.sh /path/to/your/firmware.bin
+./fw2tar/fw2tar.sh /path/to/your/firmware.bin
 ```
 
 The resulting filesystem(s) will be output to `/path/to/your/firmware.{binwalk,unblob}.*.tar.gz`, with each root filesystem extracted to its own archive.
