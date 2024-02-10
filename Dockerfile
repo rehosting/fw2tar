@@ -39,6 +39,7 @@ RUN apt-get update && \
     qtbase5-dev \
     sleuthkit \
     squashfs-tools \
+    symlinks \
     srecord \
     tar \
     unar \
