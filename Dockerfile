@@ -20,6 +20,7 @@ RUN apt-get update && \
     default-jdk \
     e2fsprogs \
     fakeroot \
+    gcc \
     git \
     gzip \
     lhasa \
@@ -39,7 +40,6 @@ RUN apt-get update && \
     qtbase5-dev \
     sleuthkit \
     squashfs-tools \
-    symlinks \
     srecord \
     tar \
     unar \
@@ -80,6 +80,15 @@ RUN pip install --upgrade pip && \
 RUN curl -L -o sasquatch_1.0_amd64.deb https://github.com/onekey-sec/sasquatch/releases/download/sasquatch-v4.5.1-4/sasquatch_1.0_amd64.deb && \
     dpkg -i sasquatch_1.0_amd64.deb && \
     rm sasquatch_1.0_amd64.deb
+
+# Symlinks(8) fork with support for a relative-to-root-directory flag
+# Makefile is slightly broken, need to explicitly create man8 directory and set INSTALL=install
+RUN git clone https://github.com/da-phil/symlinks.git -b fix-inplace-rootfs-wo-chroot /tmp/symlinks && \
+    cd /tmp/symlinks && \
+    make && \
+    mkdir -p /usr/man/man8 && \
+    make install INSTALL=install && \
+    rm -rf /tmp/symlinks
 
 # Clone unblob fork then install with poetry
 RUN git clone --depth=1 https://github.com/AndrewFasano/unblob.git /unblob
