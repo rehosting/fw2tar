@@ -1,7 +1,7 @@
 #!/bin/bash
 set -eu
 
-if [ $# -lt 2 ]; then
+if [ $# -lt 1 ]; then
   echo "Usage: $0 [--extractors=binwalk,unblob] <path to firmware file>"
   exit 1
 fi
