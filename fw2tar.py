@@ -2,20 +2,19 @@ import os
 import subprocess
 import sys
 import tempfile
+import time
 from collections import defaultdict
-from multiprocessing import Process
+from multiprocessing import Process, Lock, Manager
 from pathlib import Path
 
-# Config options
-UNBLOB = True
-BINWALK = True
+EXTRACTORS=["unblob", "binwalk"]
 
 def find_linux_filesystems(start_dir):
     key_dirs = {'bin', 'etc', 'lib', 'usr', 'var'}
     critical_files = {'bin/sh', 'etc/passwd'}
     min_required = (len(key_dirs) + len(critical_files)) // 2  # Minimum number of key dirs and files
 
-    filesystems = defaultdict(lambda: {'score': 0, 'size': 0, 'path': ''})
+    filesystems = defaultdict(lambda: {'score': 0, 'size': 0, 'path': '', 'nfiles': 0})
 
     for root, dirs, files in os.walk(start_dir):
         root_path = Path(root)
@@ -34,15 +33,22 @@ def find_linux_filesystems(start_dir):
                 size = sum((root_path / file).stat().st_size for file in files)
             except FileNotFoundError:
                 continue
-            fs_key = str(root_path)
 
+            # How many files are within this directory (recursively)?
+            try:
+                nfiles = sum(1 for _ in root_path.rglob('*'))
+            except FileNotFoundError:
+                nfiles = 0
+
+            fs_key = str(root_path)
             filesystems[fs_key]['score'] = total_matches  # Use total matches as score
-            filesystems[fs_key]['size'] += size  # Sum sizes of files for this filesystem
+            filesystems[fs_key]['size'] = size  # Sum sizes of files for this filesystem
+            filesystems[fs_key]['nfiles'] = nfiles
             filesystems[fs_key]['path'] = fs_key
 
     # Rank by size primarily, then score (total matches) as a tiebreaker
     ranked_filesystems = sorted(filesystems.values(), key=lambda x: (-x['size'], -x['score']))
-    return [Path(fs['path']) for fs in ranked_filesystems]
+    return [(Path(fs['path']), fs['size'], fs['nfiles']) for fs in ranked_filesystems]
 
 def _tar_fs(rootfs_dir, outfile):
     # Constructing the tar command with exclusions
@@ -58,70 +64,94 @@ def _tar_fs(rootfs_dir, outfile):
 
     # Execute the tar command
     result = subprocess.run(tar_command, capture_output=True, text=True)
-    if result.returncode == 0:
-        print(f"Root filesystem {rootfs_dir} archived to {outfile}")
-    else:
+    if result.returncode != 0:
         print(f"Error archiving root filesystem {rootfs_dir}: {result.stderr}")
 
 def _extract(extractor, infile, extract_dir, log_file):
-        if extractor == "unblob":
-            subprocess.run(["unblob",
-                            "--log", log_file,
-                            "--extract-dir", str(extract_dir),
-                            infile], check=True)
-        elif extractor == "binwalk":
-            subprocess.run(["binwalk", "--run-as=root",
-                            "--preserve-symlinks",
-                            "-eM",
-                            "--log", log_file,
-                            "-q", infile,
-                            "-C", str(extract_dir)],
-                            check=True)
-        else:
-            raise ValueError(f"Unknown extractor: {extractor}")
+    if extractor == "unblob":
+        cmd = subprocess.run(["unblob",
+                                "--log", log_file,
+                                "--extract-dir", str(extract_dir),
+                                infile], check=True,
+                                capture_output=True, text=True)
+    elif extractor == "binwalk":
+        cmd = subprocess.run(["binwalk", "--run-as=root",
+                                "--preserve-symlinks",
+                                "-eM",
+                                "--log", log_file,
+                                "-q", infile,
+                                "-C", str(extract_dir)],
+                                check=True, capture_output=True,
+                                text=True)
+    else:
+        raise ValueError(f"Unknown extractor: {extractor}")
+    
+    if  cmd.returncode != 0:
+        print(f"Extractor {extractor} exited non-zero: {cmd.returncode}\n\t{cmd.stderr}")
 
-def extract_and_process(extractor, infile, outfile_base, scratch_dir):
+def extract_and_process(extractor, infile, outfile_base, scratch_dir, start_time, results, results_lock):
     with tempfile.TemporaryDirectory(dir=scratch_dir) as extract_dir:
         log_file = f"{outfile_base}.{extractor}.log"
-
         # Running the appropriate extractor
         _extract(extractor, infile, Path(extract_dir), log_file)
+        post_extract = time.time()
+        print(f"{extractor} complete after {post_extract - start_time:.2f}s")
 
         rootfs_choices = find_linux_filesystems(extract_dir)
-        print("Rootfs choices: ", rootfs_choices)
 
-        for idx, root in enumerate(rootfs_choices):
+        for idx, (root, size, nfiles) in enumerate(rootfs_choices):
             outfile = f"{outfile_base}.{extractor}.{idx}.tar.gz"
             _tar_fs(root, outfile)
+            post_tar = time.time()
+            #print(f"{extractor} filesystem {idx} archived after {post_tar - post_extract:.2f}s")
 
+            with results_lock:
+                results.append((extractor, idx, size, nfiles))
 
-def main(infile, outfile_base, scratch_dir):
-
+def main(infile, outfile_base, scratch_dir, extractors=None):
     # Launching both extraction processes in parallel
     processes = []
-    if UNBLOB:
-        p_unblob = Process(target=extract_and_process, args=("unblob", infile, outfile_base, scratch_dir))
-        processes.append(p_unblob)
+    manager = Manager()
+    results = manager.list()
+    results_lock = Lock()
+    start_time = time.time()
 
-    if BINWALK:
-        p_binwalk = Process(target=extract_and_process, args=("binwalk", infile, outfile_base, scratch_dir))
-        processes.append(p_binwalk)
-
-    # Start the processes
-    for p in processes:
+    for extractor in extractors:
+        print(f"Starting {extractor} extraction...")
+        p = Process(target=extract_and_process, args=(extractor, infile, outfile_base,
+                                                      scratch_dir, start_time,
+                                                      results, results_lock))
+        processes.append(p)
         p.start()
 
     # Wait for both processes to complete
     for p in processes:
         p.join()
 
+    with results_lock:
+        print(f"fw2tar extracted {len(results)} filesystems:")
+        for (extractor, idx, size, nfiles) in sorted(results, key=lambda x: x[2], reverse=True):
+            print(f"\t{extractor} output #{idx}: {nfiles:,} files, {size:,} bytes")
+
 if __name__ == "__main__":
     if len(sys.argv) < 2:
-        print("Usage: python script.py INFILE [OUTFILE_BASE] [SCRATCHDIR]")
+        print("Usage: python script.py [--extractors=EXTRACTORS] INFILE [OUTFILE_BASE] [SCRATCHDIR]")
+        print("\tEXTRACTORS: comma-separated list of extractors (unblob, binwalk)")
         sys.exit(1)
 
-    infile = sys.argv[1]
+    if "--extractors=" in sys.argv[1]:
+        new_extractors = sys.argv[1].split("=")[1].split(",")
+        if any([new_ext not in EXTRACTORS for new_ext in new_extractors]):
+            raise ValueError(f"Unknown extractor: {new_extractors}. Supported extractors are: {EXTRACTORS}")
+        extractors = sys.argv[1].split("=")[1].split(",")
+        sys.argv.pop(1)
 
+        if not len(extractors):
+            raise ValueError("No extractors specified")
+    else:
+        extractors = EXTRACTORS
+
+    infile = sys.argv[1]
     if len(sys.argv) < 3:
         # Filename without extension by default
         outfile = f"{Path(infile).parent}/{Path(infile).stem}"
@@ -134,4 +164,5 @@ if __name__ == "__main__":
     else:
         scratch_dir = sys.argv[3]
 
-    main(infile, outfile, scratch_dir)
+    print(f"Extracting {infile} using {' '.join(extractors)} extractors...")
+    main(infile, outfile, scratch_dir, extractors=extractors)
