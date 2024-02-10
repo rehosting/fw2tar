@@ -68,26 +68,28 @@ def _tar_fs(rootfs_dir, outfile):
         print(f"Error archiving root filesystem {rootfs_dir}: {result.stderr}")
 
 def _extract(extractor, infile, extract_dir, log_file):
-    if extractor == "unblob":
-        cmd = subprocess.run(["unblob",
-                                "--log", log_file,
-                                "--extract-dir", str(extract_dir),
-                                infile], check=True,
-                                capture_output=True, text=True)
-    elif extractor == "binwalk":
-        cmd = subprocess.run(["binwalk", "--run-as=root",
-                                "--preserve-symlinks",
-                                "-eM",
-                                "--log", log_file,
-                                "-q", infile,
-                                "-C", str(extract_dir)],
-                                check=True, capture_output=True,
-                                text=True)
-    else:
-        raise ValueError(f"Unknown extractor: {extractor}")
-    
-    if  cmd.returncode != 0:
-        print(f"Extractor {extractor} exited non-zero: {cmd.returncode}\n\t{cmd.stderr}")
+    try:
+        if extractor == "unblob":
+            subprocess.run(["fakeroot", "unblob",
+                            "--log", log_file,
+                            "--extract-dir", str(extract_dir),
+                            infile], check=True,
+                            capture_output=True, text=True)
+        elif extractor == "binwalk":
+            subprocess.run(["fakeroot", "binwalk", "--run-as=root",
+                            "--preserve-symlinks",
+                            "-eM",
+                            "--log", log_file,
+                            "-q", infile,
+                            "-C", str(extract_dir)],
+                            check=True, capture_output=True,
+                            text=True)
+        else:
+            raise ValueError(f"Unknown extractor: {extractor}")
+
+    except subprocess.CalledProcessError as e:
+        print(f"Error running {extractor}: {e.returncode}\nstdout: {e.stdout}\nstderr: {e.stderr}")
+        raise e
 
 def extract_and_process(extractor, infile, outfile_base, scratch_dir, start_time, results, results_lock):
     with tempfile.TemporaryDirectory(dir=scratch_dir) as extract_dir:
