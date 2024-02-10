@@ -26,16 +26,23 @@ We express our gratitude to the developers of these tools for their hard work th
 
 ### Docker
 
-#### Build the Container
+#### Get the container
 
+Either pull from github
 ```sh
-docker build -t extract .
+docker pull ghcr.io/andrewfasano/fw2tar:main
+```
+
+Or clone this repo and build from source:
+```sh
+git clone https://github.com/AndrewFasano/fw2tar.git
+docker build -t extract fw2tar
 ```
 
 #### Extract Firmware
 
 ```sh
-./run.sh /path/to/your/firmware.bin
+./fw2tar.sh /path/to/your/firmware.bin
 ```
 
 The resulting filesystem(s) will be output to `/path/to/your/firmware.{binwalk,unblob}.*.tar.gz`, with each root filesystem extracted to its own archive.
@@ -44,7 +51,7 @@ The resulting filesystem(s) will be output to `/path/to/your/firmware.{binwalk,u
 
 #### Build the Container
 
-First, build `extract.sif` using `./make_container.sh`, or manually with:
+First, build `extract.sif` using `./build_singularity.sh`, or manually with:
 
 ```sh
 docker build -t extract .
@@ -62,7 +69,7 @@ export INPUT_FILE=/path/to/your/firmware.bin
 singularity exec \
     -B $(dirname $INPUT_FILE):/host \
     extract.sif \
-    /extract/run.sh /host/$(basename $INPUT_FILE)
+    /extract/fw2tar.sh /host/$(basename $INPUT_FILE)
 ```
 
 Your filesystem(s) will be output to `/path/to/your/firmware.{binwalk,unblob}.tar.gz`.

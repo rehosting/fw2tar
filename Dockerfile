@@ -89,3 +89,4 @@ RUN git clone --depth=1 https://github.com/AndrewFasano/unblob.git /unblob
 RUN cd /unblob && poetry install --no-dev
 
 COPY extract.py /extract/
+ENTRYPOINT [ "python3", "/extract/extract.py" ]
