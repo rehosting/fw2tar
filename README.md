@@ -1,19 +1,29 @@
 # fw2tar: Firmware to Root Filesystem Tarball Converter
 
-`fw2tar` is a robust, _unprivileged_ utility designed to convert firmware images into compressed tar archives of the image's root filesystem, preserving correct permissions without requiring root access.
+`fw2tar` is an _unprivileged_ utility designed to seamlessly convert firmware images
+into compressed tar archives, accurately reflecting the root filesystem's original permissions.
+
 
 ## Overview
+Converting firmware images into accessible filesystems often presents a significant challenge:
+striking the right balance between maintaining security and ensuring accurate extraction.
+Traditional methods require elevated privileges to replicate the filesystem accurately,
+risking security when processing untrusted inputs. `fw2tar` takes a different approach by
+producing an archive of the target filesystem which faithfully preserves filesystem
+permissions without the need to run any utilities as root.
 
-Many standard filesystem extractors strugle with the trade-off between security and functionality where root privileges are required to maintain accurate filesystem permissions. This utility tackles this trade-off by leveraging `fakeroot` and `tar`, allowing extractors to operate unprivileged while still preserving correct permissions in the output archives. This feature is particularly crucial for dynamic analyses of firmware, such as [rehosting](https://dspace.mit.edu/handle/1721.1/130505), where maintaining accurate filesystem permissions is essential.
+`fw2tar` first extracts firmware images using both [unblob](https://github.com/onekey-sec/unblob/) and [binwalk](https://github.com/ReFirmLabs/binwalk),
+finds root filesystems within the extracted directories, and packs each into its own archive while preserving file permissions.
 
-When dealing with images containing multiple root filesystems, `fw2tar` extracts each into its own archive, streamlining the process for users.
+Preserving permissions is vital for [firmware rehosting](https://dspace.mit.edu/handle/1721.1/130505)
+where altering file ownership or permissions could undermine the integrity of an analysis.
 
 ## Key Features
 
-- **Unprivileged Extraction**: Runs with standard user privileges using `fakeroot`, enhancing security.
+- **Unprivileged Extraction**: Runs with standard user privileges in an unpriviliged docker or singularity container.
 - **Permission Preservation**: Maintains correct filesystem permissions, facilitating accurate dynamic analysis.
 - **Root Filesystem Extraction**: Instead of producing every extracted file, `fw2tar` identifies and outputs archives for each identified (Linux) root filesystem.
-- **Multiple Extractors**: Extract filesystems with both [unblob](https://github.com/onekey-sec/unblob/) and [binwalk](https://github.com/ReFirmLabs/binwalk).
+- **Multiple Extractors**: Filesystems can be extracted using `unblob`, `binwalk`, or both.
 
 ## Usage
 
