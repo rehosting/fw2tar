@@ -30,7 +30,7 @@ def find_linux_filesystems(start_dir):
         total_matches = len(matched_dirs) + len(matched_files)
         if total_matches >= min_required:
             try:
-                size = sum((root_path / file).stat().st_size for file in files)
+                size = sum((root_path / file).stat().st_size for file in files if not (root_path / file).is_symlink())
             except FileNotFoundError:
                 continue
 
