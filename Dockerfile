@@ -81,11 +81,6 @@ RUN curl -L -o sasquatch_1.0_amd64.deb https://github.com/onekey-sec/sasquatch/r
     dpkg -i sasquatch_1.0_amd64.deb && \
     rm sasquatch_1.0_amd64.deb
 
-# Symlinks(8) fork with support for a relative-to-root-directory flag
-RUN git clone --depth=1 https://github.com/AndrewFasano/symlinks.git /tmp/symlinks && \
-    make -C /tmp/symlinks install && \
-    rm -rf /tmp/symlinks
-
 # Clone unblob fork then install with poetry
 RUN git clone --depth=1 https://github.com/AndrewFasano/unblob.git /unblob
 RUN cd /unblob && poetry install --no-dev
