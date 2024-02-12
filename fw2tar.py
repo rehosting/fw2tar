@@ -9,6 +9,19 @@ from pathlib import Path
 
 EXTRACTORS=["unblob", "binwalk"]
 
+def calculate_directory_size(path):
+    total_size = 0
+    for root, dirs, files in os.walk(path):
+        for file in files:
+            file_path = Path(root) / file
+            if not file_path.is_symlink():  # Skip symlinks
+                try:
+                    total_size += file_path.stat().st_size
+                except FileNotFoundError:
+                    continue
+    return total_size
+
+
 def find_linux_filesystems(start_dir):
     key_dirs = {'bin', 'etc', 'lib', 'usr', 'var'}
     critical_files = {'bin/sh', 'etc/passwd'}
@@ -29,10 +42,7 @@ def find_linux_filesystems(start_dir):
 
         total_matches = len(matched_dirs) + len(matched_files)
         if total_matches >= min_required:
-            try:
-                size = sum((root_path / file).stat().st_size for file in files if not (root_path / file).is_symlink())
-            except FileNotFoundError:
-                continue
+            size = calculate_directory_size(root_path)
 
             # How many files are within this directory (recursively)?
             try:
