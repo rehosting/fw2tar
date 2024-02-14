@@ -15,14 +15,15 @@ if [ $# -eq 2 ]; then
   fi
 fi
 
-if [ ! -f $1 ]; then
+if [ ! -f "$1" ]; then
   echo "Error: Input file not found"
   exit 1
 fi
 
 # Resolve argument path and map into container appropriately
-IN_PATH=$(readlink -f $1)
-IN_DIR=$(dirname $IN_PATH)
-IN_FILE=$(basename $IN_PATH)
+IN_PATH=$(readlink -f "$1")
+IN_DIR=$(dirname "$IN_PATH")
+IN_FILE=$(basename "$IN_PATH")
 
-docker run --rm -v ${IN_DIR}:/host fw2tar --extractors=${EXTRACTORS} /host/${IN_FILE}
+#docker run --rm -v ${IN_DIR}:/host fw2tar --extractors=${EXTRACTORS} /host/${IN_FILE}
+docker run --rm -v ${IN_DIR}:/host -v $(pwd)/unblob:/unblob fw2tar --extractors=${EXTRACTORS} "/host/${IN_FILE}"
