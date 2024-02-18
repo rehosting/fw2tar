@@ -138,6 +138,10 @@ def extract_and_process(extractor, infile, outfile_base, scratch_dir, start_time
 
         rootfs_choices = find_linux_filesystems(extract_dir)
 
+        if not len(rootfs_choices):
+            print(f"No Linux filesystems found extracting {infile} with {extractor}")
+            return
+
         for idx, (root, size, nfiles) in enumerate(rootfs_choices):
             tarbase = f"{outfile_base}.{extractor}.{idx}"
             _tar_fs(root, tarbase)
