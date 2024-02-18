@@ -1,4 +1,5 @@
 import os
+import stat
 import subprocess
 import sys
 import tempfile
@@ -21,19 +22,26 @@ def calculate_directory_size(path):
                     continue
     return total_size
 
+def count_executable_files(path):
+    """Count executable files in directory."""
+    count = 0
+    for entry in path.rglob('*'):
+        if entry.is_file():
+            mode = entry.stat().st_mode
+            if mode & (stat.S_IXUSR | stat.S_IXGRP | stat.S_IXOTH):
+                count += 1
+    return count
 
-def find_linux_filesystems(start_dir):
+def find_linux_filesystems(start_dir, min_executables=10):
     key_dirs = {'bin', 'etc', 'lib', 'usr', 'var'}
     critical_files = {'bin/sh', 'etc/passwd'}
     min_required = (len(key_dirs) + len(critical_files)) // 2  # Minimum number of key dirs and files
 
-    filesystems = defaultdict(lambda: {'score': 0, 'size': 0, 'path': '', 'nfiles': 0})
+    filesystems = defaultdict(lambda: {'score': 0, 'size': 0, 'path': '', 'nfiles': 0, 'executables': 0})
 
     for root, dirs, files in os.walk(start_dir):
         root_path = Path(root)
-        depth = len(root_path.relative_to(start_dir).parts)
 
-        # Directly check for presence of key directories and critical files
         matched_dirs = key_dirs.intersection(set(dirs))
         matched_files = set()
         for critical_file in critical_files:
@@ -43,21 +51,21 @@ def find_linux_filesystems(start_dir):
         total_matches = len(matched_dirs) + len(matched_files)
         if total_matches >= min_required:
             size = calculate_directory_size(root_path)
+            executables = count_executable_files(root_path)
 
-            # How many files are within this directory (recursively)?
-            try:
-                nfiles = sum(1 for _ in root_path.rglob('*'))
-            except FileNotFoundError:
-                nfiles = 0
+            if executables >= min_executables:
+                try:
+                    nfiles = sum(1 for _ in root_path.rglob('*'))
+                except FileNotFoundError:
+                    nfiles = 0
 
-            fs_key = str(root_path)
-            filesystems[fs_key]['score'] = total_matches  # Use total matches as score
-            filesystems[fs_key]['size'] = size  # Sum sizes of files for this filesystem
-            filesystems[fs_key]['nfiles'] = nfiles
-            filesystems[fs_key]['path'] = fs_key
+                fs_key = str(root_path)
+                filesystems[fs_key].update({'score': total_matches, 'size': size, 'nfiles': nfiles, 'path': fs_key, 'executables': executables})
 
-    # Rank by size primarily, then score (total matches) as a tiebreaker
-    ranked_filesystems = sorted(filesystems.values(), key=lambda x: (-x['size'], -x['score']))
+    # Filter filesystems by those having at least min_executables, then rank by size, executables, and score
+    filtered_filesystems = {k: v for k, v in filesystems.items() if v['executables'] >= min_executables}
+    ranked_filesystems = sorted(filtered_filesystems.values(), key=lambda x: (-x['size'], -x['executables'], -x['score']))
+
     return [(Path(fs['path']), fs['size'], fs['nfiles']) for fs in ranked_filesystems]
 
 def _tar_fs(rootfs_dir, tarbase):
@@ -73,6 +81,7 @@ def _tar_fs(rootfs_dir, tarbase):
         "--mtime=UTC 2019-01-01",
         #"--xattrs", # Introduces non-determinism
         "--exclude=*_extract",
+        "--exclude=0.tar", # Common binwalk artifact
         "--exclude=squashfs-root",
         "--exclude=dev",
         "-C", str(rootfs_dir),
