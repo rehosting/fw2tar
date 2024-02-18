@@ -86,4 +86,5 @@ RUN git clone --depth=1 https://github.com/AndrewFasano/unblob.git /unblob
 RUN cd /unblob && poetry install --no-dev
 
 COPY fw2tar.py /
-ENTRYPOINT [ "python3", "/fw2tar.py" ]
+
+#ENTRYPOINT [ "python3", "/fw2tar.py" ]
