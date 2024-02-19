@@ -10,17 +10,37 @@ from pathlib import Path
 
 EXTRACTORS=["unblob", "binwalk"]
 
-def calculate_directory_size(path):
-    total_size = 0
-    for root, dirs, files in os.walk(path):
-        for file in files:
-            file_path = Path(root) / file
-            if not file_path.is_symlink():  # Skip symlinks
-                try:
-                    total_size += file_path.stat().st_size
-                except FileNotFoundError:
-                    continue
-    return total_size
+BAD_SUFFIXES = ['_extract', '.uncompressed', '.unknown', # Filename suffixes that show up as extraction artifacts
+                'squashfs-root', '0.tar']
+
+def get_dir_size_exes(path):
+    '''
+    Recursively calculate the size of a directory. Ignore our disallowed suffixes.
+    as those are extraction artifacts.
+    '''
+    total_size, total_files, total_executables = 0, 0, 0
+
+    for entry in path.iterdir():
+        if any([entry.name.endswith(x) for x in BAD_SUFFIXES]):
+            # Don't recurse into nor count files with bad suffixes
+            continue
+
+        if entry.is_file():
+            total_files += 1
+            if entry.stat().st_mode & (stat.S_IXUSR | stat.S_IXGRP | stat.S_IXOTH):
+                total_executables += 1
+            try:
+                total_size += entry.stat().st_size
+            except FileNotFoundError as e:
+                print(f"Unexpected FileNotFoundError: {e}")
+                continue
+        elif entry.is_dir():
+            (dir_sz, dir_files, dir_exe) = get_dir_size_exes(entry)
+            total_size += dir_sz
+            total_files += dir_files
+            total_executables += dir_exe
+
+    return (total_size, total_files, total_executables)
 
 def count_executable_files(path):
     """Count executable files in directory."""
@@ -32,7 +52,7 @@ def count_executable_files(path):
                 count += 1
     return count
 
-def find_linux_filesystems(start_dir, min_executables=10):
+def find_linux_filesystems(start_dir, min_executables=10, extractor=None):
     key_dirs = {'bin', 'etc', 'lib', 'usr', 'var'}
     critical_files = {'bin/sh', 'etc/passwd'}
     min_required = (len(key_dirs) + len(critical_files)) // 2  # Minimum number of key dirs and files
@@ -50,23 +70,47 @@ def find_linux_filesystems(start_dir, min_executables=10):
 
         total_matches = len(matched_dirs) + len(matched_files)
         if total_matches >= min_required:
-            size = calculate_directory_size(root_path)
-            executables = count_executable_files(root_path)
+            size, nfiles, executables = get_dir_size_exes(root_path)
 
-            if executables >= min_executables:
-                try:
-                    nfiles = sum(1 for _ in root_path.rglob('*'))
-                except FileNotFoundError:
-                    nfiles = 0
+            if executables < min_executables:
+                print(f"Warning {extractor if extractor else ''}: {executables} executables < {min_executables} required")
+                continue
 
-                fs_key = str(root_path)
-                filesystems[fs_key].update({'score': total_matches, 'size': size, 'nfiles': nfiles, 'path': fs_key, 'executables': executables})
+            filesystems[str(root_path)].update({'score': total_matches, 'size': size, 'nfiles': nfiles, 'path': str(root_path), 'executables': executables})
 
     # Filter filesystems by those having at least min_executables, then rank by size, executables, and score
-    filtered_filesystems = {k: v for k, v in filesystems.items() if v['executables'] >= min_executables}
+    #filtered_filesystems = {k: v for k, v in filesystems.items() if v['executables'] >= min_executables}
+    filtered_filesystems = {k: v for k, v in filesystems.items()}
     ranked_filesystems = sorted(filtered_filesystems.values(), key=lambda x: (-x['size'], -x['executables'], -x['score']))
 
     return [(Path(fs['path']), fs['size'], fs['nfiles']) for fs in ranked_filesystems]
+
+def find_all_filesystems(start_dir, other_than=None):
+    '''
+    Find every non-empty extracted filesystem, except those in other_than list.
+    Returns a sorted list based on number of files (descending order).
+    '''
+    # Initialize filesystems with defaultdict
+    filesystems = defaultdict(lambda: {'size': 0, 'nfiles': 0, 'path': ''})
+
+    for root, dirs, files in os.walk(start_dir):
+        root_path = Path(root)
+
+        # Check if the current directory is not in the exclusion list and ends with '_extract'
+        if root_path.name.endswith('_extract') and root_path not in (other_than or []):
+            size, nfiles, _ = get_dir_size_exes(root_path) # Don't care about executables
+            print(f"NFRILES:", nfiles, size, root_path)
+            if size == 0:
+                continue
+            filesystems[str(root_path)].update({'size': size, 'nfiles': nfiles, 'path': str(root_path)})
+            print(f"Found non-root filesystem: {root_path} with {nfiles:,} files, {size:,} bytes")
+
+    # Convert the filesystems to a list of tuples and sort them by the number of files
+    sorted_filesystems = sorted(filesystems.values(), key=lambda x: x['nfiles'], reverse=True)
+
+    # Return list of tuples (Path, size, nfiles) for each filesystem
+    return [(Path(fs['path']), fs['size'], fs['nfiles']) for fs in sorted_filesystems]
+
 
 def _tar_fs(rootfs_dir, tarbase):
     # First, define the name of the uncompressed tar archive (temporary name)
@@ -80,10 +124,16 @@ def _tar_fs(rootfs_dir, tarbase):
         "--group=root",
         "--mtime=UTC 2019-01-01",
         #"--xattrs", # Introduces non-determinism
-        "--exclude=*_extract",
-        "--exclude=0.tar", # Common binwalk artifact
-        "--exclude=squashfs-root",
-        "--exclude=dev",
+        # Common binwalk artifacts:
+            "--exclude=0.tar",
+            "--exclude=squashfs-root",
+
+        # Unblob artifacts
+            "--exclude=*_extract",
+            "--exclude=*.uncompressed",
+            "--exclude=*.unknown",
+
+        "--exclude=dev", # Don't want to take devices, permissions are a pain and tar complains
         "-C", str(rootfs_dir),
         "."
     ]
@@ -136,7 +186,7 @@ def extract_and_process(extractor, infile, outfile_base, scratch_dir, start_time
         post_extract = time.time()
         print(f"{extractor} complete after {post_extract - start_time:.2f}s")
 
-        rootfs_choices = find_linux_filesystems(extract_dir)
+        rootfs_choices = find_linux_filesystems(extract_dir, extractor=extractor)
 
         if not len(rootfs_choices):
             print(f"No Linux filesystems found extracting {infile} with {extractor}")
@@ -145,11 +195,22 @@ def extract_and_process(extractor, infile, outfile_base, scratch_dir, start_time
         for idx, (root, size, nfiles) in enumerate(rootfs_choices):
             tarbase = f"{outfile_base}.{extractor}.{idx}"
             _tar_fs(root, tarbase)
-            post_tar = time.time()
-            #print(f"{extractor} filesystem {idx} archived after {post_tar - post_extract:.2f}s")
 
             with results_lock:
-                results.append((extractor, idx, size, nfiles))
+                results.append((extractor, idx, size, nfiles, True))
+
+        # Now find non-Linux filesystems, anything except rootfs_choices
+        other_filesystems = find_all_filesystems(extract_dir, other_than=[x[0] for x in rootfs_choices])
+
+        print(f"Found {len(other_filesystems)} non-root filesystems")
+
+
+        for idx, (root, size, nfiles) in enumerate(other_filesystems):
+            tarbase = f"{outfile_base}.{extractor}.nonroot.{idx}"
+            _tar_fs(root, tarbase)
+
+            with results_lock:
+                results.append((extractor, idx, size, nfiles, False))
 
 def main(infile, outfile_base, scratch_dir, extractors=None):
     # Launching both extraction processes in parallel
@@ -173,8 +234,11 @@ def main(infile, outfile_base, scratch_dir, extractors=None):
 
     with results_lock:
         print(f"fw2tar extracted {len(results)} filesystems:")
-        for (extractor, idx, size, nfiles) in sorted(results, key=lambda x: x[2], reverse=True):
-            print(f"\t{extractor} output #{idx}: {nfiles:,} files, {size:,} bytes")
+        for (extractor, idx, size, nfiles, root) in sorted(results, key=lambda x: (x[4], x[2]), reverse=True):
+            if root:
+                print(f"\t{extractor} primary #{idx}: {nfiles:,} files, {size:,} bytes")
+            else:
+                print(f"\t{extractor} secondary #{idx}: {nfiles:,} files, {size:,} bytes")
 
 if __name__ == "__main__":
     if len(sys.argv) < 2:
