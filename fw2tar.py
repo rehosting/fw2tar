@@ -154,6 +154,9 @@ def _tar_fs(rootfs_dir, tarbase):
         print(f"Error compressing tar archive {uncompressed_outfile}: {gzip_result.stderr}")
         return
 
+    # Chmod the tar.gz file to 644
+    os.chmod(f"{uncompressed_outfile}.gz", 0o644)
+
 def _extract(extractor, infile, extract_dir, log_file):
     try:
         if extractor == "unblob":
