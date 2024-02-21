@@ -178,7 +178,7 @@ def _extract(extractor, infile, extract_dir, log_file):
         print(f"Error running {extractor}: {e.returncode}\nstdout: {e.stdout}\nstderr: {e.stderr}")
         raise e
 
-def extract_and_process(extractor, infile, outfile_base, scratch_dir, start_time, results, results_lock):
+def extract_and_process(extractor, infile, outfile_base, scratch_dir, start_time, results, results_lock, nonroot=False):
     with tempfile.TemporaryDirectory(dir=scratch_dir) as extract_dir:
         log_file = f"{outfile_base}.{extractor}.log"
         # Running the appropriate extractor
@@ -199,18 +199,19 @@ def extract_and_process(extractor, infile, outfile_base, scratch_dir, start_time
             with results_lock:
                 results.append((extractor, idx, size, nfiles, True))
 
-        # Now find non-Linux filesystems, anything except rootfs_choices
-        other_filesystems = find_all_filesystems(extract_dir, other_than=[x[0] for x in rootfs_choices])
+        if nonroot:
+            # Now find non-Linux filesystems, anything except rootfs_choices
+            other_filesystems = find_all_filesystems(extract_dir, other_than=[x[0] for x in rootfs_choices])
 
-        print(f"Found {len(other_filesystems)} non-root filesystems")
+            print(f"Found {len(other_filesystems)} non-root filesystems")
 
 
-        for idx, (root, size, nfiles) in enumerate(other_filesystems):
-            tarbase = f"{outfile_base}.{extractor}.nonroot.{idx}"
-            _tar_fs(root, tarbase)
+            for idx, (root, size, nfiles) in enumerate(other_filesystems):
+                tarbase = f"{outfile_base}.{extractor}.nonroot.{idx}"
+                _tar_fs(root, tarbase)
 
-            with results_lock:
-                results.append((extractor, idx, size, nfiles, False))
+                with results_lock:
+                    results.append((extractor, idx, size, nfiles, False))
 
 def main(infile, outfile_base, scratch_dir, extractors=None):
     # Launching both extraction processes in parallel
