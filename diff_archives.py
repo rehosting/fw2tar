@@ -1,4 +1,5 @@
 import tarfile
+import os
 
 def parse_permissions(octal_permission):
     """Convert octal permission to a list of binary permissions."""
@@ -57,6 +58,18 @@ def extract_file_details(tar_path):
     with tarfile.open(tar_path, 'r') as tar:
         for member in tar.getmembers():
             file_details[member.name] = member.mode
+
+            # If it's a symlink, also add details about the target
+            if member.issym():
+                # First, check does the symlink target exist within the archive
+                try:
+                    tar.getmember("." + member.linkname)
+                    exists = True
+                except KeyError:
+                    exists = False
+                abs_dest = "/" + os.path.normpath(os.path.dirname(member.name) + "/" + member.linkname)
+                file_details[member.name + " -> " + abs_dest + (" (missing)" if not exists else "")] = member.mode
+
     return file_details
 
 def diff_tar_archives(tar1_path, tar2_path):
