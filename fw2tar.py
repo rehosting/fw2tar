@@ -157,13 +157,13 @@ def _tar_fs(rootfs_dir, tarbase):
 def _extract(extractor, infile, extract_dir, log_file):
     try:
         if extractor == "unblob":
-            subprocess.run(["fakeroot", "unblob",
+            subprocess.run(["unblob",
                             "--log", log_file,
                             "--extract-dir", str(extract_dir),
                             infile], check=True,
                             capture_output=True, text=True)
         elif extractor == "binwalk":
-            subprocess.run(["fakeroot", "binwalk", "--run-as=root",
+            subprocess.run(["binwalk", "--run-as=root",
                             "--preserve-symlinks",
                             "-eM",
                             "--log", log_file,
@@ -242,6 +242,12 @@ def main(infile, outfile_base, scratch_dir, extractors=None):
                 print(f"\t{extractor} secondary #{idx}: {nfiles:,} files, {size:,} bytes")
 
 if __name__ == "__main__":
+    os.umask(0o000)
+    # Assert root
+    if os.geteuid() != 0:
+        print("This script must be run as (fake)root")
+        sys.exit(1)
+
     if len(sys.argv) < 2:
         print("Usage: python script.py [--extractors=EXTRACTORS] INFILE [OUTFILE_BASE] [SCRATCHDIR]")
         print("\tEXTRACTORS: comma-separated list of extractors (unblob, binwalk)")

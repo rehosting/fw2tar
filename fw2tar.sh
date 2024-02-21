@@ -25,4 +25,4 @@ IN_PATH=$(readlink -f "$1")
 IN_DIR=$(dirname "$IN_PATH")
 IN_FILE=$(basename "$IN_PATH")
 
-docker run --rm -v ${IN_DIR}:/host fw2tar python3 /fw2tar.py --extractors=${EXTRACTORS} "/host/${IN_FILE}"
+docker run --rm -v ${IN_DIR}:/host -v $(pwd)/unblob:/unblob fw2tar fakeroot python3 /fw2tar.py --extractors=${EXTRACTORS} "/host/${IN_FILE}"

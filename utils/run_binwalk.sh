@@ -16,4 +16,4 @@ IN_DIR=$(dirname "$IN_PATH")
 IN_FILE=$(basename "$IN_PATH")
 
 # Need no entrypoint on dockerfile
-docker run --rm -v ${IN_DIR}:/host fw2tar binwalk -0 root -1 --preserve-symlinks -eM /host/${IN_FILE} -C /host/${IN_FILE}_extract.binwalk
+docker run --rm -v ${IN_DIR}:/host fw2tar fakeroot binwalk -0 root -1 --preserve-symlinks -eM /host/${IN_FILE} -C /host/${IN_FILE}_extract.binwalk

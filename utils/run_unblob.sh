@@ -14,8 +14,8 @@ IN_FILE=$(basename "$IN_PATH")
 if [ -d unblob ]; then
   echo "Using local unblob"
   docker run --rm -v ${IN_DIR}:/host -v $(pwd)/unblob:/unblob \
-  fw2tar unblob -v "/host/${IN_FILE}"
+  fw2tar fakeroot unblob -v "/host/${IN_FILE}"
 else
   docker run --rm -v ${IN_DIR}:/host fw2tar \
-  unblob -v "/host/${IN_FILE}"
+  fakeroot unblob -v "/host/${IN_FILE}"
 fi
