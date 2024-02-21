@@ -74,8 +74,11 @@ def extract_file_details(tar_path):
 
 def diff_tar_archives(tar1_path, tar2_path):
     """Compare two tar archives and return differences."""
-    tar1_files = extract_file_details(tar1_path)
-    tar2_files = extract_file_details(tar2_path)
+    try:
+        tar1_files = extract_file_details(tar1_path)
+        tar2_files = extract_file_details(tar2_path)
+    except EOFError:
+        return [], [], None
 
     unique_to_tar1 = set(tar1_files.keys()) - set(tar2_files.keys())
     unique_to_tar2 = set(tar2_files.keys()) - set(tar1_files.keys())
@@ -88,17 +91,24 @@ def diff_tar_archives(tar1_path, tar2_path):
 
     return unique_to_tar1, unique_to_tar2, perms
 
-def main(tar1_path, tar2_path):
+def main(tar1_path, tar2_path, compare_perms=True, show_examples=True):
     try:
         unique_to_tar1, unique_to_tar2, perms = diff_tar_archives(tar1_path, tar2_path)
 
-        print(f"{len(unique_to_tar1)} files unique to {tar1_path}:")
-        for f in unique_to_tar1:
-            print("\t", f)
+        if len(unique_to_tar1):
+            print(f"{len(unique_to_tar1)} files unique to {tar1_path}:")
+            if show_examples:
+                for f in unique_to_tar1:
+                    print("\t", f)
 
-        print(f"{len(unique_to_tar2)} files unique to {tar2_path}:")
-        for f in unique_to_tar2:
-            print("\t", f)
+        if len(unique_to_tar2):
+            print(f"{len(unique_to_tar2)} files unique to {tar2_path}:")
+            if show_examples:
+                for f in unique_to_tar2:
+                    print("\t", f)
+
+        if not compare_perms:
+            return
 
         print(f"{len(perms)} files with different permissions from {tar1_path} to {tar2_path}:")
         diffs = {} # diff -> count
@@ -133,8 +143,17 @@ def test():
 
 if __name__ == '__main__':
     from sys import argv
-    if len(argv) != 3:
-        print("Usage: python script.py <tar1_path> <tar2_path>")
-    else:
-        tar1_path, tar2_path = argv[1], argv[2]
-        main(tar1_path, tar2_path)
+    if len(argv) < 3:
+        raise ValueError("Usage: python diff_archives.py [--noperms] [--noexamples] <tar1_path> <tar2_path>")
+
+    perms=True
+    if '--noperms' in argv:
+        perms=False
+
+    examples=True
+    if '--noexamples' in argv:
+        examples=False
+
+    tar1_path, tar2_path = argv[-2], argv[-1]
+
+    main(tar1_path, tar2_path, compare_perms=perms, show_examples=examples)
