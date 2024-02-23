@@ -34,6 +34,18 @@ def get_dir_size_exes(path):
             except FileNotFoundError as e:
                 print(f"Unexpected FileNotFoundError: {e}")
                 continue
+            except OSError as e:
+                # Happens if there are too many symlinks
+                print("Unexpected OSError: {e}")
+                continue
+            except PermissionError as e:
+                # Happens if we can't read the file
+                print("Unexpected PermissionError: {e}")
+                continue
+            except Exception as e:
+                print(f"Unexpected error: {e}")
+                continue
+
         elif entry.is_dir():
             (dir_sz, dir_files, dir_exe) = get_dir_size_exes(entry)
             total_size += dir_sz
