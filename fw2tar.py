@@ -25,6 +25,12 @@ def get_dir_size_exes(path):
             # Don't recurse into nor count files with bad suffixes
             continue
 
+        if entry.is_symlink():
+            #print(f"Symlink {entry} found. Is file={entry.is_file()}, is dir={entry.is_dir()}")
+            # Don't count these - otherwise we might recurse foreer or examine
+            # outside our extract root (since we're allowing absolute symlinks that point anywhere)
+            continue
+
         if entry.is_file():
             total_files += 1
             if entry.stat().st_mode & (stat.S_IXUSR | stat.S_IXGRP | stat.S_IXOTH):
@@ -47,10 +53,11 @@ def get_dir_size_exes(path):
                 continue
 
         elif entry.is_dir():
-            (dir_sz, dir_files, dir_exe) = get_dir_size_exes(entry)
-            total_size += dir_sz
-            total_files += dir_files
-            total_executables += dir_exe
+            if entry.name != 'dev':
+                (dir_sz, dir_files, dir_exe) = get_dir_size_exes(entry)
+                total_size += dir_sz
+                total_files += dir_files
+                total_executables += dir_exe
 
     return (total_size, total_files, total_executables)
 
