@@ -45,10 +45,9 @@ RUN apt-get update && \
     unar \
     unrar-free \
     unzip \
+    xz-utils \
     zlib1g-dev \
     zstd
-
-RUN curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y
 
 # Install dependencies
 RUN pip install --upgrade pip && \
@@ -76,15 +75,11 @@ RUN pip install --upgrade pip && \
     python3 -m pip install python-lzo==1.14 && \
     poetry config virtualenvs.create false
 
-# Install sasquatch from unblob's 
-RUN curl -L -o sasquatch_1.0_amd64.deb https://github.com/onekey-sec/sasquatch/releases/download/sasquatch-v4.5.1-4/sasquatch_1.0_amd64.deb && \
-    dpkg -i sasquatch_1.0_amd64.deb && \
-    rm sasquatch_1.0_amd64.deb
-
 # Clone unblob fork then install with poetry
 RUN git clone --depth=1 https://github.com/AndrewFasano/unblob.git /unblob
 RUN cd /unblob && poetry install --no-dev
 
-COPY fw2tar.py /
+# Explicitly install unblob deps - mostly captured above, but some of the .debs get updated and installed via curl
+RUN sh -c /unblob/unblob/install-deps.sh
 
-#ENTRYPOINT [ "python3", "/fw2tar.py" ]
+COPY fw2tar.py /
