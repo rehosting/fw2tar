@@ -159,6 +159,12 @@ def test():
 
 if __name__ == '__main__':
     from sys import argv
+
+    if len(argv) == 2 and ".binwalk." in argv[1]:
+        # Expert usage: just pass in the binwalk path and we'll set tar2 to the same
+        # but with .binwalk. -> .unblob.
+        argv.append(argv[1].replace(".binwalk.", ".unblob."))
+
     if len(argv) < 3:
         raise ValueError("Usage: python diff_archives.py [--noperms] [--noexamples] <tar1_path> <tar2_path>")
 
