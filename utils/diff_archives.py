@@ -62,13 +62,26 @@ def extract_file_details(tar_path):
             # If it's a symlink, also add details about the target
             if member.issym():
                 # First, check does the symlink target exist within the archive
+
+                # Resolve relative targets to absolute
+                if not member.linkname.startswith("/"):
+                    # Combine with the directory of the link and normalize
+                    target = os.path.normpath(os.path.dirname(member.name) + "/" + member.linkname)
+                else:
+                    target = member.linkname
+
+                if not target.startswith("/") and not target.startswith("./"):
+                    target = "./" + target
+
+                if not target.startswith("."):
+                    target = "." + target
+
                 try:
-                    tar.getmember("." + member.linkname)
+                    tar.getmember(target)
                     exists = True
                 except KeyError:
                     exists = False
-                abs_dest = "./" + os.path.normpath(os.path.dirname(member.name) + "/" + member.linkname)
-                file_details[member.name + " -> " + abs_dest + (" (missing)" if not exists else "")] = member.mode
+                file_details[member.name + " -> " + target + (" (missing)" if not exists else "")] = member.mode
 
     return file_details
 
