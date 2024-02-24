@@ -44,7 +44,7 @@ export INPUT_FILE=/path/to/your/firmware.bin
 docker run --rm -it \
     -v $(dirname $INPUT_FILE):/host \
     ghcr.io/andrewfasano/fw2tar:main \
-    /host/$(basename $INPUT_FILE)
+    python3 /fw2tar.py /host/$(basename $INPUT_FILE)
 ```
 
 The resulting filesystem(s) will be output to `/path/to/your/firmware.{binwalk,unblob}.*.tar.gz`, with each root filesystem extracted to its own archive.
