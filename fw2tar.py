@@ -25,12 +25,6 @@ def get_dir_size_exes(path):
             # Don't recurse into nor count files with bad suffixes
             continue
 
-        if entry.is_symlink():
-            #print(f"Symlink {entry} found. Is file={entry.is_file()}, is dir={entry.is_dir()}")
-            # Don't count these - otherwise we might recurse foreer or examine
-            # outside our extract root (since we're allowing absolute symlinks that point anywhere)
-            continue
-
         if entry.is_file():
             total_files += 1
             if entry.stat().st_mode & (stat.S_IXUSR | stat.S_IXGRP | stat.S_IXOTH):
@@ -52,7 +46,11 @@ def get_dir_size_exes(path):
                 print(f"Unexpected error: {e}")
                 continue
 
-        elif entry.is_dir():
+        elif entry.is_dir() and not entry.is_symlink():
+            # We can't recurse into symlink directories because they could
+            # take us out of the extract dir or make us go into a cycle.
+            # But we do count them as files above because symlinks should
+            # count as executables, i.e., /bin/sh -> /bin/bash
             if entry.name != 'dev':
                 (dir_sz, dir_files, dir_exe) = get_dir_size_exes(entry)
                 total_size += dir_sz
@@ -118,7 +116,6 @@ def find_all_filesystems(start_dir, other_than=None):
         # Check if the current directory is not in the exclusion list and ends with '_extract'
         if root_path.name.endswith('_extract') and root_path not in (other_than or []):
             size, nfiles, _ = get_dir_size_exes(root_path) # Don't care about executables
-            print(f"NFRILES:", nfiles, size, root_path)
             if size == 0:
                 continue
             filesystems[str(root_path)].update({'size': size, 'nfiles': nfiles, 'path': str(root_path)})
