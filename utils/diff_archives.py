@@ -70,6 +70,9 @@ def extract_file_details(tar_path):
                 else:
                     target = member.linkname
 
+                while "//" in target:
+                    target = target.replace("//", "/")
+
                 if not target.startswith("/") and not target.startswith("./"):
                     target = "./" + target
 
