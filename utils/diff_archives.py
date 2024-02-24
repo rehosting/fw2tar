@@ -67,7 +67,7 @@ def extract_file_details(tar_path):
                     exists = True
                 except KeyError:
                     exists = False
-                abs_dest = "/" + os.path.normpath(os.path.dirname(member.name) + "/" + member.linkname)
+                abs_dest = "./" + os.path.normpath(os.path.dirname(member.name) + "/" + member.linkname)
                 file_details[member.name + " -> " + abs_dest + (" (missing)" if not exists else "")] = member.mode
 
     return file_details
