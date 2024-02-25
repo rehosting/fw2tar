@@ -82,4 +82,10 @@ RUN cd /unblob && poetry install --no-dev
 # Explicitly install unblob deps - mostly captured above, but some of the .debs get updated and installed via curl
 RUN sh -c /unblob/unblob/install-deps.sh
 
+# Patch to fix unblob #767 that hasn't yet been upstreamed. Pip install didn't work. I don't understand poetry
+#RUN pip install git+https://github.com/qkaiser/arpy.git
+RUN curl "https://raw.githubusercontent.com/qkaiser/arpy/23faf88a88488c41fc4348ea2b70996803f84f40/arpy.py" -o /usr/local/lib/python3.10/dist-packages/arpy.py
+
+COPY ./unblob /unblob
+
 COPY fw2tar.py /
