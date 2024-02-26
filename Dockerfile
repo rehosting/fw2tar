@@ -86,6 +86,4 @@ RUN sh -c /unblob/unblob/install-deps.sh
 #RUN pip install git+https://github.com/qkaiser/arpy.git
 RUN curl "https://raw.githubusercontent.com/qkaiser/arpy/23faf88a88488c41fc4348ea2b70996803f84f40/arpy.py" -o /usr/local/lib/python3.10/dist-packages/arpy.py
 
-COPY ./unblob /unblob
-
 COPY fw2tar.py /
