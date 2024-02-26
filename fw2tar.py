@@ -51,11 +51,10 @@ def get_dir_size_exes(path):
             # take us out of the extract dir or make us go into a cycle.
             # But we do count them as files above because symlinks should
             # count as executables, i.e., /bin/sh -> /bin/bash
-            if entry.name != 'dev':
-                (dir_sz, dir_files, dir_exe) = get_dir_size_exes(entry)
-                total_size += dir_sz
-                total_files += dir_files
-                total_executables += dir_exe
+            (dir_sz, dir_files, dir_exe) = get_dir_size_exes(entry)
+            total_size += dir_sz
+            total_files += dir_files
+            total_executables += dir_exe
 
     return (total_size, total_files, total_executables)
 
@@ -136,10 +135,10 @@ def _tar_fs(rootfs_dir, tarbase):
         "-cf",
         uncompressed_outfile,
         "--sort=name",
-        "--owner=root",
-        "--group=root",
         "--mtime=UTC 2019-01-01",
+
         #"--xattrs", # Introduces non-determinism
+
         # Common binwalk artifacts:
             "--exclude=0.tar",
             "--exclude=squashfs-root",
@@ -149,7 +148,9 @@ def _tar_fs(rootfs_dir, tarbase):
             "--exclude=*.uncompressed",
             "--exclude=*.unknown",
 
-        "--exclude=dev", # Don't want to take devices, permissions are a pain and tar complains
+        # Don't want to take devices, permissions are a pain and tar complains about character devices
+            "--exclude=./dev",
+
         "-C", str(rootfs_dir),
         "."
     ]
