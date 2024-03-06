@@ -241,6 +241,25 @@ def extract_and_process(extractor, infile, outfile_base, scratch_dir, start_time
                 with results_lock:
                     results.append((extractor, idx, size, nfiles, False))
 
+def monitor_processes(processes, results, max_wait=600, follow_up_wait=120):
+    '''
+    We'll wait up to max_wait for *any* result. After we have a result, we'll only wait
+    up to follow_up_wait for all processes to complete. If they don't, we'll terminate them.
+    '''
+
+    start_time = time.time()
+    while True:
+        if (time.time() - start_time) > max_wait or (results and (time.time() - start_time) > follow_up_wait):
+            for p in processes:
+                if p.is_alive():
+                    print(f"Terminating {p.name}...")
+                    p.terminate()
+            break
+        if all(not p.is_alive() for p in processes):
+            # All processes completed within the time frame
+            break
+        time.sleep(5)
+
 def main(infile, outfile_base, scratch_dir, extractors=None, verbose=False, primary_limit=1, secondary_limit=0):
     # Launching both extraction processes in parallel
     processes = []
@@ -256,12 +275,13 @@ def main(infile, outfile_base, scratch_dir, extractors=None, verbose=False, prim
                                                       scratch_dir, start_time, verbose,
                                                       primary_limit, secondary_limit,
                                                       results, results_lock))
+        p.name = f"{extractor} extraction"
         processes.append(p)
         p.start()
 
     # Wait for both processes to complete
-    for p in processes:
-        p.join()
+    monitor_processes(processes, results)
+
     # Note we no longer need results_lock because we're back to a single process
 
     best_hashes = {} # extractor -> hash of best filesystem
