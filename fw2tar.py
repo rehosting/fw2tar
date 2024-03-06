@@ -68,7 +68,7 @@ def count_executable_files(path):
                 count += 1
     return count
 
-def find_linux_filesystems(start_dir, min_executables=10, extractor=None):
+def find_linux_filesystems(start_dir, min_executables=10, extractor=None, verbose=False):
     key_dirs = {'bin', 'etc', 'lib', 'usr', 'var'}
     critical_files = {'bin/sh', 'etc/passwd'}
     min_required = (len(key_dirs) + len(critical_files)) // 2  # Minimum number of key dirs and files
@@ -88,9 +88,10 @@ def find_linux_filesystems(start_dir, min_executables=10, extractor=None):
         if total_matches >= min_required:
             size, nfiles, executables = get_dir_size_exes(root_path)
 
-            #if executables < min_executables:
-            #    print(f"Warning {extractor if extractor else ''}: {executables} executables < {min_executables} required on analysis of FS {root_path}")
-            #    continue
+            if executables < min_executables:
+                if verbose:
+                    print(f"Warning {extractor if extractor else ''}: {executables} executables < {min_executables} required on analysis of FS {root_path}")
+                continue
 
             filesystems[str(root_path)].update({'score': total_matches, 'size': size, 'nfiles': nfiles, 'path': str(root_path), 'executables': executables})
 
@@ -198,42 +199,49 @@ def _extract(extractor, infile, extract_dir, log_file):
         print(f"Error running {extractor}: {e.returncode}\nstdout: {e.stdout}\nstderr: {e.stderr}")
         raise e
 
-def extract_and_process(extractor, infile, outfile_base, scratch_dir, start_time, results, results_lock, nonroot=False):
+def extract_and_process(extractor, infile, outfile_base, scratch_dir, start_time, verbose, primary_limit,
+                        secondary_limit, results, results_lock):
     with tempfile.TemporaryDirectory(dir=scratch_dir) as extract_dir:
         log_file = f"{outfile_base}.{extractor}.log"
         # Running the appropriate extractor
         _extract(extractor, infile, Path(extract_dir), log_file)
         post_extract = time.time()
-        print(f"{extractor} complete after {post_extract - start_time:.2f}s")
+        if verbose:
+            print(f"{extractor} complete after {post_extract - start_time:.2f}s")
 
-        rootfs_choices = find_linux_filesystems(extract_dir, extractor=extractor)
+        rootfs_choices = find_linux_filesystems(extract_dir, extractor=extractor, verbose=verbose)
 
-        if not len(rootfs_choices):
+        if not len(rootfs_choices) and verbose:
             print(f"No Linux filesystems found extracting {infile} with {extractor}")
             return
 
         for idx, (root, size, nfiles) in enumerate(rootfs_choices):
+            if idx >= primary_limit:
+                break
             tarbase = f"{outfile_base}.{extractor}.{idx}"
             _tar_fs(root, tarbase)
 
+            archive_hash = subprocess.run(["sha1sum", f"{tarbase}.tar.gz"], capture_output=True, text=True).stdout.split()[0]
             with results_lock:
-                results.append((extractor, idx, size, nfiles, True))
+                results.append((extractor, idx, size, nfiles, True, archive_hash))
 
-        if nonroot:
+        if secondary_limit > 0:
             # Now find non-Linux filesystems, anything except rootfs_choices
             other_filesystems = find_all_filesystems(extract_dir, other_than=[x[0] for x in rootfs_choices])
 
-            print(f"Found {len(other_filesystems)} non-root filesystems")
-
+            if verbose:
+                print(f"Found {len(other_filesystems)} non-root filesystems")
 
             for idx, (root, size, nfiles) in enumerate(other_filesystems):
+                if idx >= secondary_limit:
+                    break
                 tarbase = f"{outfile_base}.{extractor}.nonroot.{idx}"
                 _tar_fs(root, tarbase)
 
                 with results_lock:
                     results.append((extractor, idx, size, nfiles, False))
 
-def main(infile, outfile_base, scratch_dir, extractors=None):
+def main(infile, outfile_base, scratch_dir, extractors=None, verbose=False, primary_limit=1, secondary_limit=0):
     # Launching both extraction processes in parallel
     processes = []
     manager = Manager()
@@ -242,9 +250,11 @@ def main(infile, outfile_base, scratch_dir, extractors=None):
     start_time = time.time()
 
     for extractor in extractors:
-        print(f"Starting {extractor} extraction...")
+        if verbose:
+            print(f"Starting {extractor} extraction...")
         p = Process(target=extract_and_process, args=(extractor, infile, outfile_base,
-                                                      scratch_dir, start_time,
+                                                      scratch_dir, start_time, verbose,
+                                                      primary_limit, secondary_limit,
                                                       results, results_lock))
         processes.append(p)
         p.start()
@@ -252,14 +262,62 @@ def main(infile, outfile_base, scratch_dir, extractors=None):
     # Wait for both processes to complete
     for p in processes:
         p.join()
+    # Note we no longer need results_lock because we're back to a single process
 
-    with results_lock:
-        print(f"fw2tar extracted {len(results)} filesystems:")
-        for (extractor, idx, size, nfiles, root) in sorted(results, key=lambda x: (x[4], x[2]), reverse=True):
-            if root:
-                print(f"\t{extractor} primary #{idx}: {nfiles:,} files, {size:,} bytes")
-            else:
-                print(f"\t{extractor} secondary #{idx}: {nfiles:,} files, {size:,} bytes")
+    best_hashes = {} # extractor -> hash of best filesystem
+    for (extractor, idx, size, nfiles, root, archive_hash) in results:
+        if idx == 0:
+            best_hashes[extractor] = archive_hash
+
+    if verbose:
+        for (extractor, idx, size, nfiles, root, archive_hash) in sorted(results, key=lambda x: (x[4], x[2]), reverse=True):
+            if root and idx == 0:
+                best_hashes[extractor] = archive_hash
+            if verbose:
+                if root:
+                    print(f"\t{archive_hash}: {extractor: <10} primary #{idx}: {nfiles:,} files, {size:,} bytes.")
+                else:
+                    print(f"\t{archive_hash}: {extractor} secondary #{idx}: {nfiles:,} files, {size:,} bytes")
+
+    # Compare results, if we only have one, take it. Otherwise prioritize unblob.
+    # Avoid storing duplicates of identical filesystem.
+    # Store best results at {input_base}.rootfs.tar.gz, others at {input_base}.{extractor}.0.tar.gz
+
+    best_extractor = None
+    if len(best_hashes) == 0:
+        # No extractors found anything
+        msg = "nofs"
+    elif len(best_hashes) == 1:
+        # Only one extractor worked
+        best_extractor = list(best_hashes.keys())[0]
+        msg = f"only_{best_extractor}"
+    else:
+        # Multiple extractors found something
+        best_extractor = "unblob"
+        if len(set(best_hashes.values())) == 1:
+            msg = "identical"
+        else:
+            # Results are distinct, but exist. Warn and take unblob
+            msg = "distinct"
+
+    # Report results, even if non-verbose
+    print(f"Best extractor: {best_extractor} ({msg})" + (f" archive at {os.path.basename(outfile_base)}.rootfs.tar.gz" if best_extractor else ""))
+
+    # Write msg into a file. Only if we have multiple extractors - if we just have one the results is either output exists/no output exists
+    if len(extractors) > 1:
+        with open(f"{outfile_base}.txt", "w") as f:
+            f.write(msg+"\n")
+
+    # If we have a best_extractor, we can rename the file and delete the others
+    if best_extractor:
+        best_filename = f"{outfile_base}.{best_extractor}.0.tar.gz"
+        os.rename(best_filename, f"{outfile_base}.rootfs.tar.gz")
+
+        # If filesystems were identical we can delete the others. Otherwise we'll leave them for the user to inspect
+        if msg == "identical":
+            for other_extractor in best_hashes.keys():
+                if other_extractor != best_extractor:
+                    os.remove(f"{outfile_base}.{other_extractor}.0.tar.gz")
 
 if __name__ == "__main__":
     os.umask(0o000)
@@ -267,6 +325,11 @@ if __name__ == "__main__":
     if os.geteuid() != 0:
         print("This script must be run as (fake)root")
         sys.exit(1)
+
+    # TODO: expose as CLI options
+    verbose = False
+    primary_limit = 1
+    secondary_limit = 0
 
     if len(sys.argv) < 2:
         print("Usage: python script.py [--extractors=EXTRACTORS] INFILE [OUTFILE_BASE] [SCRATCHDIR]")
@@ -298,5 +361,6 @@ if __name__ == "__main__":
     else:
         scratch_dir = sys.argv[3]
 
-    print(f"Extracting {infile} using {' '.join(extractors)} extractors...")
-    main(infile, outfile, scratch_dir, extractors=extractors)
+    if verbose:
+        print(f"Extracting {infile} using {' '.join(extractors)} extractors...")
+    main(infile, outfile, scratch_dir, extractors=extractors, verbose=verbose, primary_limit=primary_limit, secondary_limit=secondary_limit)
