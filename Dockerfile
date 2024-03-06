@@ -75,6 +75,10 @@ RUN pip install --upgrade pip && \
     python3 -m pip install python-lzo==1.14 && \
     poetry config virtualenvs.create false
 
+# CramFS no longer in apt - needed by binwalk
+RUN git clone --depth=1 https://github.com/davidribyrne/cramfs.git /cramfs && \
+   cd /cramfs && make && make install
+
 # Clone unblob fork then install with poetry
 RUN git clone --depth=1 https://github.com/AndrewFasano/unblob.git /unblob
 RUN cd /unblob && poetry install --no-dev
