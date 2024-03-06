@@ -88,9 +88,9 @@ def find_linux_filesystems(start_dir, min_executables=10, extractor=None):
         if total_matches >= min_required:
             size, nfiles, executables = get_dir_size_exes(root_path)
 
-            if executables < min_executables:
-                print(f"Warning {extractor if extractor else ''}: {executables} executables < {min_executables} required")
-                continue
+            #if executables < min_executables:
+            #    print(f"Warning {extractor if extractor else ''}: {executables} executables < {min_executables} required on analysis of FS {root_path}")
+            #    continue
 
             filesystems[str(root_path)].update({'score': total_matches, 'size': size, 'nfiles': nfiles, 'path': str(root_path), 'executables': executables})
 
