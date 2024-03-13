@@ -2,35 +2,55 @@ import tarfile
 import os
 
 def parse_permissions(octal_permission):
-    """Convert octal permission to a list of binary permissions."""
-    binary_permission = bin(octal_permission)[2:].zfill(9)
-    return [binary_permission[i:i+3] for i in range(0, 9, 3)]
-
+    """Convert octal permission to a list of binary permissions, including special bits."""
+    binary_permission = bin(octal_permission)[2:].zfill(12)
+    return [binary_permission[:3]] + [binary_permission[i:i+3] for i in range(3, 12, 3)]
 
 def compare_permissions(old_perm, new_perm):
-    """Compare two permission sets and return the differences."""
+    """Compare two permission sets including special bits and return the differences."""
     perms = ['r', 'w', 'x']
-    types = ['u', 'g', 'o']
+    types = ['s', 'u', 'g', 'o']  # Include special bits as 's'
     changes = []
 
-    for i in range(3):
-        for j in range(3):
+    for i in range(4):  # Loop through 4 types (including special)
+        for j in range(3):  # Loop through r, w, x
+            # For the special bits, only compare if it's the first set (s)
+            if i == 0 and j > 0:  # Skip checks for SUID and SGID bits in 's' type
+                continue
             if old_perm[i][j] != new_perm[i][j]:
                 change = '+' if new_perm[i][j] == '1' else '-'
-                changes.append(f"{types[i]}{change}{perms[j]}")
+                change_type = types[i] if i > 0 else ''  # Don't prefix changes for special bits
+                perm_type = perms[j] if i > 0 else 't' if j == 0 else ''
+                changes.append(f"{change_type}{change}{perm_type}")
 
     return ','.join(changes)
 
 def permission_to_string(perm):
     '''
-    Convert a permission list to a standard rwxrwxrwx string
+    Convert a permission list including special bits to a standard rwxrwxrwx string
     '''
     perms = ['r', 'w', 'x']
+    special = ['', 's', 's', 't']  # Representations for SUID, SGID, and Sticky bit
 
     if isinstance(perm, int):
         perm = parse_permissions(perm)
-    
-    return ''.join([perms[j] if perm[i][j] == '1' else '-' for i in range(3) for j in range(3)])
+
+    result = ''
+    for i in range(1, 4):  # Skip the first set, which is special bits
+        for j in range(3):
+            result += perms[j] if perm[i][j] == '1' else '-'
+            if i < 3 and j == 2:  # Check for SUID/SGID
+                if perm[0][i-1] == '1':  # If special bit is set
+                    result = result[:-1] + (perms[j].upper() if result[-1] == '-' else special[i])
+
+    # Handle Sticky Bit separately
+    if perm[0][2] == '1':  # If sticky bit is set
+        if result[-1] == 'x':
+            result = result[:-1] + special[3]
+        else:
+            result = result[:-1] + result[-1].upper()  # Use uppercase T if execute is not set
+
+    return result
 
 def combine_perms(perm_diff):
     '''
@@ -98,11 +118,11 @@ def diff_tar_archives(tar1_path, tar2_path):
 
     unique_to_tar1 = set(tar1_files.keys()) - set(tar2_files.keys())
     unique_to_tar2 = set(tar2_files.keys()) - set(tar1_files.keys())
-    #perm_diff = {f: permission_difference(tar1_files[f], tar2_files[f]) 
-    #             for f in tar1_files 
+    #perm_diff = {f: permission_difference(tar1_files[f], tar2_files[f])
+    #             for f in tar1_files
     #             if f in tar2_files and tar1_files[f] != tar2_files[f]}
-    perms = {f: (tar1_files[f], tar2_files[f]) 
-                 for f in tar1_files 
+    perms = {f: (tar1_files[f], tar2_files[f])
+                 for f in tar1_files
                  if f in tar2_files and tar1_files[f] != tar2_files[f]}
 
     return unique_to_tar1, unique_to_tar2, perms
