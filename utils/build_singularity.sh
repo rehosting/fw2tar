@@ -5,7 +5,7 @@ SCRIPTPATH="$( cd -- "$(dirname "$0")" >/dev/null 2>&1 ; pwd -P )"
 OUT=$(dirname "$SCRIPTPATH")
 
 
-rm -f $OUT/fw2tar*.sif || true
+rm -f fw2tar*.sif $OUT/fw2tar*.sif || true
 
 echo "1: Building docker container"
 docker build -t fw2tar $OUT
