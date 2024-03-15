@@ -1,10 +1,15 @@
 import tarfile
 import os
 
-def parse_permissions(octal_permission):
-    """Convert octal permission to a list of binary permissions, including special bits."""
-    binary_permission = bin(octal_permission)[2:].zfill(12)
-    return [binary_permission[:3]] + [binary_permission[i:i+3] for i in range(3, 12, 3)]
+def parse_permissions(perm_int):
+    '''
+    Convert integer permission to a binary string representation split into four parts:
+    special bits, user, group, and others permissions.
+    '''
+    # Convert to binary and ensure it's 12 bits (for special and standard permissions)
+    bin_perm = bin(perm_int)[2:].zfill(12)
+    # Split into special (first 3 bits) and standard permissions (remaining 9 bits)
+    return bin_perm[:3], bin_perm[3:6], bin_perm[6:9], bin_perm[9:]
 
 def compare_permissions(old_perm, new_perm):
     """Compare two permission sets including special bits and return the differences."""
@@ -74,10 +79,10 @@ def permission_difference(old_octal, new_octal):
 
 def extract_file_details(tar_path):
     """Extract file names and permissions from a tar archive."""
-    file_details = {}
+    file_details = {} # filename -> (permissions, size)
     with tarfile.open(tar_path, 'r') as tar:
         for member in tar.getmembers():
-            file_details[member.name] = member.mode
+            file_details[member.name] = (member.mode, member.size)
 
             # If it's a symlink, also add details about the target
             if member.issym():
@@ -104,9 +109,30 @@ def extract_file_details(tar_path):
                     exists = True
                 except KeyError:
                     exists = False
-                file_details[member.name + " -> " + target + (" (missing)" if not exists else "")] = member.mode
+                file_details[member.name + " -> " + target + (" (missing)" if not exists else "")] = (member.mode, member.size)
 
     return file_details
+
+def analyze_paths(f1k, f2k, f1, f2):
+    """
+    We have keys for sets in f1k/f2k. We have the details in f1/f2
+    Find basenames that match between the two where the sizes are the same
+    """
+
+    matches = [] # (f1 path, f2 path)
+    f1k_basenames = {os.path.basename(f): f for f in f1k}
+    f2k_basenames = {os.path.basename(f): f for f in f2k}
+
+    # For union of basenames, check if the sizes+perms are the same
+    for basename in set(f1k_basenames.keys()) | set(f2k_basenames.keys()):
+        if basename in f1k_basenames and basename in f2k_basenames:
+            if f1[f1k_basenames[basename]] == f2[f2k_basenames[basename]]:
+                matches.append((f1k_basenames[basename], f2k_basenames[basename]))
+
+    return matches
+
+
+
 
 def diff_tar_archives(tar1_path, tar2_path):
     """Compare two tar archives and return differences."""
@@ -118,18 +144,26 @@ def diff_tar_archives(tar1_path, tar2_path):
 
     unique_to_tar1 = set(tar1_files.keys()) - set(tar2_files.keys())
     unique_to_tar2 = set(tar2_files.keys()) - set(tar1_files.keys())
+
+    same_files_different_paths = analyze_paths(unique_to_tar1, unique_to_tar2, tar1_files, tar2_files)
+
+    for f1, f2 in same_files_different_paths:
+        unique_to_tar1.remove(f1)
+        unique_to_tar2.remove(f2)
+
+
     #perm_diff = {f: permission_difference(tar1_files[f], tar2_files[f])
     #             for f in tar1_files
     #             if f in tar2_files and tar1_files[f] != tar2_files[f]}
-    perms = {f: (tar1_files[f], tar2_files[f])
+    perms = {f: (tar1_files[f][0], tar2_files[f][0])
                  for f in tar1_files
-                 if f in tar2_files and tar1_files[f] != tar2_files[f]}
+                 if f in tar2_files and tar1_files[f][0] != tar2_files[f][0]}
 
-    return unique_to_tar1, unique_to_tar2, perms
+    return unique_to_tar1, unique_to_tar2, perms, same_files_different_paths
 
 def main(tar1_path, tar2_path, compare_perms=True, show_examples=True):
     try:
-        unique_to_tar1, unique_to_tar2, perms = diff_tar_archives(tar1_path, tar2_path)
+        unique_to_tar1, unique_to_tar2, perms, moved_files = diff_tar_archives(tar1_path, tar2_path)
 
         if len(unique_to_tar1):
             print(f"{len(unique_to_tar1)} files unique to {tar1_path}:")
@@ -143,6 +177,12 @@ def main(tar1_path, tar2_path, compare_perms=True, show_examples=True):
                 for f in unique_to_tar2:
                     print("\t", f)
 
+        if len(moved_files):
+            print(f"{len(moved_files)} files with the same content but different paths:")
+            if show_examples:
+                for f1, f2 in moved_files:
+                    print(f"\t{f1} ==> {f2}")
+
         if not compare_perms:
             return
 
@@ -150,13 +190,13 @@ def main(tar1_path, tar2_path, compare_perms=True, show_examples=True):
         diffs = {} # diff -> count
         diff_files = {} # diff -> [files]
         for f, (p1, p2) in perms.items():
-            #print(f"\t{f}: {diff}")
             diffs[(p1, p2)] = diffs.get((p1, p2), 0) + 1
             diff_files[(p1, p2)] = diff_files.get((p1, p2), []) + [f]
 
         # Sort by count
         for (p1, p2), count in sorted(diffs.items(), key=lambda x: x[1], reverse=True):
             #print(f"\t{count:> 5} files have diff {combine_perms(permission_difference(p1, p2))} ({permission_to_string(p1)} -> {permission_to_string(p2)})")
+            assert(p1 != p2)
             print(f"\t{count:> 5} files {permission_to_string(p1)} -> {permission_to_string(p2)}")
             # Print 5 files with the difference
             for f in diff_files[(p1, p2)][:5]:
@@ -180,10 +220,10 @@ def test():
 if __name__ == '__main__':
     from sys import argv
 
-    if len(argv) == 2 and ".binwalk." in argv[1]:
-        # Expert usage: just pass in the binwalk path and we'll set tar2 to the same
-        # but with .binwalk. -> .unblob.
-        argv.append(argv[1].replace(".binwalk.", ".unblob."))
+    if len(argv) == 2 and ".rootfs." in argv[1]:
+        # Expert usage: just pass in the rootfs path and we'll set arg2 to the same
+        # but with .rootfs. -> .binwalk.0.
+        argv.append(argv[1].replace(".rootfs.", ".binwalk.0."))
 
     if len(argv) < 3:
         raise ValueError("Usage: python diff_archives.py [--noperms] [--noexamples] <tar1_path> <tar2_path>")
