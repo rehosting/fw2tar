@@ -213,6 +213,108 @@ def _extract(extractor, infile, extract_dir, log_file):
         print(f"Error running {extractor}: {e.returncode}\nstdout: {e.stdout}\nstderr: {e.stderr}")
         raise e
 
+def collect_symlinks(root, base_root = None):
+    if base_root is None:
+        base_root = root
+    symlink_targets = set()
+
+    for entry in root.iterdir():
+        if any([entry.name.endswith(x) for x in BAD_SUFFIXES]):
+            continue
+        if entry.name.startswith('squashfs-root-') or entry.name.startswith("cpio-root-"):
+            # Special case of bad suffixes
+            continue
+        if entry.is_symlink():
+
+            if entry.resolve(strict=False).exists():
+                # Symlink points to something that exists - must be in the same filesystem
+                continue
+
+            # If it's relative:
+            if entry.is_absolute():
+                target = entry.resolve(strict=False)
+                for parent in target.parents:
+                    if parent.exists():
+                        break
+                else:
+                    # Never found a parent. Should never happen - there should always be an extraction dir
+                    raise ValueError(f"Could not find a parent for {target}, {entry}")
+
+                # We have parent now, strip from entry
+                symlink_targets.add(target.relative_to(parent).as_posix())
+
+            else:
+                print(f"RELATIVE: TODO?", entry)
+        elif entry.is_dir():
+            symlink_targets.update(collect_symlinks(entry, base_root))
+    return symlink_targets
+
+def find_best_mount_point(mountable_fs, missing_paths, verbose):
+    best_mount_point = None
+    max_resolved = 0
+
+    # A dictionary to track the number of resolved paths for each mount point
+    mount_point_efficiency = {}
+
+    for (src_root, missing_path) in missing_paths:
+        if mountable_fs == src_root:
+            # Don't use the same FS
+            continue
+        path_components = missing_path.strip("/").split('/')
+
+        for i in range(1, len(path_components)):
+            this_mountpoint = "/".join(path_components[:i])
+            resolved = set()
+
+            # Check if mounting at this_mountpoint resolves any missing path
+            if missing_path.startswith(this_mountpoint):
+                relative_path = missing_path[len(this_mountpoint):].strip("/")
+                potential_resolved_path = mountable_fs / relative_path
+                if potential_resolved_path.exists():
+                    resolved.add(relative_path)
+
+            # Update the dictionary with the number of resolved paths for this mount point
+            if len(resolved):
+                if this_mountpoint not in mount_point_efficiency:
+                    mount_point_efficiency[this_mountpoint] = len(resolved)
+                else:
+                    mount_point_efficiency[this_mountpoint] += len(resolved)
+
+                # Check if this is the best mount point so far
+                if mount_point_efficiency[this_mountpoint] > max_resolved:
+                    best_mount_point = this_mountpoint
+                    max_resolved = mount_point_efficiency[this_mountpoint]
+
+    if verbose and best_mount_point:
+        print(f"Best mounting {mountable_fs} at /{best_mount_point} resolves {max_resolved} missing paths")
+
+    return best_mount_point, max_resolved
+
+def unify_filesystems(extract_dir, rootfs_choices, verbose):
+    '''
+    Given multiple filesystems, try to identify if they point into each other.
+    For example if one filesystem has a symlink pointing to /mnt/data/foo which doesn't
+    exist, and a second filesystem has data/foo, we'll report that the 2nd filesystem
+    can be mounted at /mnt.
+    '''
+    # Within each extracted filesystem, check if there are dangling symlinks.
+
+    missing_paths = set()
+
+    for root, _, _ in rootfs_choices:
+        print(root.relative_to(extract_dir))
+        links  = collect_symlinks(root)
+        for l in links:
+            missing_paths.add((root, l))
+
+    # TODO: what if 2nd filesystem gets first mounted into it and that's best - not sure how to handle yet
+    if len(missing_paths) > 1:
+        print(f"Found {len(missing_paths)} missing paths")
+
+        for root, _, _ in rootfs_choices:
+            find_best_mount_point(root, missing_paths, verbose)
+
+
 def extract_and_process(extractor, infile, outfile_base, scratch_dir, start_time, verbose, primary_limit,
                         secondary_limit, results, results_lock):
     with tempfile.TemporaryDirectory(dir=scratch_dir) as extract_dir:
@@ -224,6 +326,9 @@ def extract_and_process(extractor, infile, outfile_base, scratch_dir, start_time
             print(f"{extractor} complete after {post_extract - start_time:.2f}s")
 
         rootfs_choices = find_linux_filesystems(extract_dir, extractor=extractor, verbose=verbose)
+
+        if len(rootfs_choices) > 1:
+            unify_filesystems(extract_dir, rootfs_choices, verbose)
 
         if not len(rootfs_choices) and verbose:
             print(f"No Linux filesystems found extracting {infile} with {extractor}")
