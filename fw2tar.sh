@@ -1,28 +1,62 @@
 #!/bin/bash
 set -eu
 
+# Function to display usage
+usage() {
+    echo "$0 is a simple shell wrapper around a dockerized fw2tar.py with the following usage:"
+    docker run --rm fw2tar python3 /fw2tar.py --help
+    exit 1
+}
+
+# Check for minimum number of arguments
 if [ $# -lt 1 ]; then
-  echo "Usage: $0 [--extractors=binwalk,unblob] <path to firmware file>"
-  exit 1
+    usage
 fi
 
-# If we have --extractors flag
-EXTRACTORS="binwalk,unblob"
-if [ $# -eq 2 ]; then
-  if [[ $1 == --extractors=* ]]; then
-    EXTRACTORS=$(echo $1 | cut -d= -f2)
+# Initialize variables
+OTHER_ARGS=()
+
+# The first argument is always the input file
+INFILE="$1"
+shift
+
+# If the next argument exists and doesn't start with a dash, it's the output file
+if [ $# -gt 0 ] && [[ "$1" != -* ]]; then
+    OUTFILE="$1"
     shift
-  fi
+else
+    OUTFILE="" # No output file specified
 fi
 
-if [ ! -f "$1" ]; then
-  echo "Error: Input file not found"
-  exit 1
+# The rest of the arguments are collected into OTHER_ARGS
+OTHER_ARGS=("$@")
+
+# Validate input file exists
+if [ ! -f "$INFILE" ]; then
+    echo "Error: Input file not found. Did you provide the input file as the FIRST argument?"
+    exit 1
 fi
 
-# Resolve argument path and map into container appropriately
-IN_PATH=$(readlink -f "$1")
+# Resolve input file path to ensure correct Docker volume mapping
+IN_PATH=$(readlink -f "$INFILE")
 IN_DIR=$(dirname "$IN_PATH")
-IN_FILE=$(basename "$IN_PATH")
+IN_FILE_BASENAME=$(basename "$IN_PATH")
 
-docker run --rm -v ${IN_DIR}:/host fw2tar fakeroot python3 /fw2tar.py --extractors=${EXTRACTORS} "/host/${IN_FILE}"
+# Prepare Docker command
+DOCKER_CMD="docker run --rm -v ${IN_DIR}:/hostin"
+
+# Setup output file directory mapping if specified
+if [ ! -z "$OUTFILE" ]; then
+    OUT_PATH=$(readlink -f "$OUTFILE")
+    OUT_DIR=$(dirname "$OUT_PATH")
+    OUT_FILE_BASENAME=$(basename "$OUT_PATH")
+    DOCKER_CMD+=" -v ${OUT_DIR}:/hostout"
+    # Pass outfile as an optional positional argument to the Python script
+    OTHER_ARGS=("/hostout/${OUT_FILE_BASENAME}" "${OTHER_ARGS[@]}")
+fi
+
+# Finalize Docker command with input file and other arguments
+DOCKER_CMD+=" fw2tar fakeroot python3 /fw2tar.py \"/hostin/${IN_FILE_BASENAME}\" ${OTHER_ARGS[*]}"
+
+# Execute the Docker command
+eval $DOCKER_CMD

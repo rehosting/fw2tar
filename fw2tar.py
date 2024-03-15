@@ -1,3 +1,4 @@
+import argparse
 import os
 import stat
 import subprocess
@@ -94,15 +95,20 @@ def find_linux_filesystems(start_dir, min_executables=10, extractor=None, verbos
 
             if executables < min_executables:
                 if verbose:
-                    print(f"Warning {extractor if extractor else ''}: {executables} executables < {min_executables} required on analysis of FS {root_path}")
+                    print(f"Warning {extractor if extractor else ''}: {executables} executables < {min_executables} required on analysis of FS {root_path} with size {size:,}")
                 continue
 
             filesystems[str(root_path)].update({'score': total_matches, 'size': size, 'nfiles': nfiles, 'path': str(root_path), 'executables': executables})
+        #elif total_matches > 0 and verbose:
+            #print(f"{extractor if extractor else ''} found {total_matches} matches in {root_path} but not enough for a filesystem")
 
-    # Filter filesystems by those having at least min_executables, then rank by size, executables, and score
-    #filtered_filesystems = {k: v for k, v in filesystems.items() if v['executables'] >= min_executables}
-    filtered_filesystems = {k: v for k, v in filesystems.items()}
-    ranked_filesystems = sorted(filtered_filesystems.values(), key=lambda x: (-x['size'], -x['executables'], -x['score']))
+    # Filesystems will only have values if they met the minimum requirements
+    # Now we rank by highest # executables with size and then score as tie breakers
+    ranked_filesystems = sorted(filesystems.values(), key=lambda x: (-x['executables'], -x['size'], -x['score']))
+
+    if verbose:
+        for fs in ranked_filesystems:
+            print(f"{extractor if extractor else ''} found filesystem: {fs['path']} with {fs['nfiles']:,} files, {fs['size']:,} bytes, {fs['executables']} executables")
 
     return [(Path(fs['path']), fs['size'], fs['nfiles']) for fs in ranked_filesystems]
 
@@ -159,6 +165,10 @@ def _tar_fs(rootfs_dir, tarbase):
         "-C", str(rootfs_dir),
         "."
     ]
+
+    # We want the root directory: ./ to have consistent permissions
+    # we'll just set it to 755. NOT RECURSIVE
+    os.chmod(rootfs_dir, 0o755)
 
     # Execute the tar command
     tar_result = subprocess.run(tar_command, capture_output=True, text=True)
@@ -223,6 +233,8 @@ def extract_and_process(extractor, infile, outfile_base, scratch_dir, start_time
             if idx >= primary_limit:
                 break
             tarbase = f"{outfile_base}.{extractor}.{idx}"
+            if verbose:
+                print(f"Archiving {root} as {tarbase}.tar.gz")
             _tar_fs(root, tarbase)
 
             archive_hash = subprocess.run(["sha1sum", f"{tarbase}.tar.gz"], capture_output=True, text=True).stdout.split()[0]
@@ -264,7 +276,7 @@ def monitor_processes(processes, results, max_wait=600, follow_up_wait=120):
             break
         time.sleep(5)
 
-def main(infile, outfile_base, scratch_dir, extractors=None, verbose=False, primary_limit=1, secondary_limit=0):
+def main(infile, outfile_base, scratch_dir="/tmp", extractors=None, verbose=False, primary_limit=1, secondary_limit=0):
     # Launching both extraction processes in parallel
     processes = []
     manager = Manager()
@@ -384,46 +396,39 @@ def main(infile, outfile_base, scratch_dir, extractors=None, verbose=False, prim
 
 if __name__ == "__main__":
     os.umask(0o000)
-    # Assert root
     if os.geteuid() != 0:
         print("This script must be run as (fake)root")
         sys.exit(1)
 
-    # TODO: expose as CLI options
-    verbose = False
-    primary_limit = 1
-    secondary_limit = 0
+    parser = argparse.ArgumentParser(description="Process some files.")
+    parser.add_argument("infile", type=str, help="Input file")
+    parser.add_argument("outfile", nargs='?', type=str, help="Output file base (optional). Default is infile without extension.")
+    parser.add_argument("scratch_dir", nargs='?', default="/tmp/", type=str, help="Scratch directory (optional). Default /tmp")
+    parser.add_argument("--extractors", type=str, help=f"Comma-separated list of extractors. Supported values are {' '.join(EXTRACTORS)}", default="default_extractor")
+    parser.add_argument("--verbose", action='store_true', help="Enable verbose output")
+    parser.add_argument("--primary_limit", type=int, default=1, help="Maximum number of root-like filesystems to extract. Default 1")
+    parser.add_argument("--secondary_limit", type=int, default=0, help="Maximum number of non-root-like filesystems to extract. Default 0")
+    parser.add_argument("--force", action='store_true', help="Overwrite existing output file")
 
-    if len(sys.argv) < 2:
-        print("Usage: python script.py [--extractors=EXTRACTORS] INFILE [OUTFILE_BASE] [SCRATCHDIR]")
-        print("\tEXTRACTORS: comma-separated list of extractors (unblob, binwalk)")
-        sys.exit(1)
+    args = parser.parse_args()
 
-    if "--extractors=" in sys.argv[1]:
-        new_extractors = sys.argv[1].split("=")[1].split(",")
-        if any([new_ext not in EXTRACTORS for new_ext in new_extractors]):
-            raise ValueError(f"Unknown extractor: {new_extractors}. Supported extractors are: {EXTRACTORS}")
-        extractors = sys.argv[1].split("=")[1].split(",")
-        sys.argv.pop(1)
-
-        if not len(extractors):
-            raise ValueError("No extractors specified")
+    if args.extractors == "default_extractor":
+        args.extractors = EXTRACTORS
     else:
-        extractors = EXTRACTORS
+        args.extractors = args.extractors.split(',')
 
-    infile = sys.argv[1]
-    if len(sys.argv) < 3:
+    if not args.outfile:
         # Filename without extension by default
-        outfile = f"{Path(infile).parent}/{Path(infile).stem}"
-    else:
-        outfile = sys.argv[2]
+        args.outfile = f"{Path(args.infile).parent}/{Path(args.infile).stem}"
 
-    if len(sys.argv) < 4:
-        # Default to /tmp
-        scratch_dir = "/tmp/"
-    else:
-        scratch_dir = sys.argv[3]
+    # Does outfile already exist?
+    if Path(args.outfile + ".rootfs.tar.gz").exists():
+        print(f"Output file {args.outfile}.rootfs.tar.gz already exists. " + ("Refusing to replace as --force not specified." if not args.force else "Overwriting."))
+        if not args.force:
+            sys.exit(1)
+        else:
+            os.remove(args.outfile + ".rootfs.tar.gz")
 
-    if verbose:
-        print(f"Extracting {infile} using {' '.join(extractors)} extractors...")
-    main(infile, outfile, scratch_dir, extractors=extractors, verbose=verbose, primary_limit=primary_limit, secondary_limit=secondary_limit)
+    main(args.infile, args.outfile, scratch_dir=args.scratch_dir,
+         extractors=args.extractors, verbose=args.verbose, 
+         primary_limit=args.primary_limit, secondary_limit=args.secondary_limit)
