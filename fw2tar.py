@@ -430,5 +430,5 @@ if __name__ == "__main__":
             os.remove(args.outfile + ".rootfs.tar.gz")
 
     main(args.infile, args.outfile, scratch_dir=args.scratch_dir,
-         extractors=args.extractors, verbose=args.verbose, 
+         extractors=args.extractors, verbose=args.verbose,
          primary_limit=args.primary_limit, secondary_limit=args.secondary_limit)
