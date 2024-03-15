@@ -257,7 +257,8 @@ def extract_and_process(extractor, infile, outfile_base, scratch_dir, start_time
                 with results_lock:
                     results.append((extractor, idx, size, nfiles, False))
 
-def monitor_processes(processes, results, max_wait=600, follow_up_wait=120):
+
+def monitor_processes(processes, results, max_wait=600, follow_up_wait=600):
     '''
     We'll wait up to max_wait for *any* result. After we have a result, we'll only wait
     up to follow_up_wait for all processes to complete. If they don't, we'll terminate them.
