@@ -11,7 +11,7 @@ from pathlib import Path
 EXTRACTORS=["unblob", "binwalk"]
 
 BAD_SUFFIXES = ['_extract', '.uncompressed', '.unknown', # Filename suffixes that show up as extraction artifacts
-                'squashfs-root', '0.tar']
+                'cpio-root', 'squashfs-root', '0.tar'] # squashfs-root-* is special cased below
 
 def get_dir_size_exes(path):
     '''
@@ -23,6 +23,10 @@ def get_dir_size_exes(path):
     for entry in path.iterdir():
         if any([entry.name.endswith(x) for x in BAD_SUFFIXES]):
             # Don't recurse into nor count files with bad suffixes
+            continue
+        # Check if the name ends with squashfs-root-*
+        if entry.name.startswith('squashfs-root-') or entry.name.startswith("cpio-root-"):
+            # Special case of bad suffixes
             continue
 
         if entry.is_file():
@@ -303,6 +307,8 @@ def main(infile, outfile_base, scratch_dir, extractors=None, verbose=False, prim
     # Avoid storing duplicates of identical filesystem.
     # Store best results at {input_base}.rootfs.tar.gz, others at {input_base}.{extractor}.0.tar.gz
 
+    col_names = ['permissions', 'ownership', 'size', 'date', 'time', 'path', 'issymlink', 'symlinkdest']
+
     best_extractor = None
     if len(best_hashes) == 0:
         # No extractors found anything
@@ -317,8 +323,45 @@ def main(infile, outfile_base, scratch_dir, extractors=None, verbose=False, prim
         if len(set(best_hashes.values())) == 1:
             msg = "identical"
         else:
-            # Results are distinct, but exist. Warn and take unblob
-            msg = "distinct"
+            # Results are distinct, but exist. Figure out why
+            msg = "distinct_hash"
+            paths = [f"{outfile_base}.{extractor}.0.tar.gz" for extractor in best_hashes.keys()]
+            # Run tar tvf on each path - check if total number of lines is different -> different number of files
+            # or check if columns are different: permissions, owner, group, size, date
+            # Record the type of difference
+            tar_result = {}
+            for path in paths:
+                tar_result[path] = subprocess.check_output(["tar", "tvf", path]).decode("utf-8", errors="ignore").splitlines()
+
+            # First check: are line counts different?
+            line_counts = {path: len(tar_result[path]) for path in paths}
+            if len(set(line_counts.values())) > 1:
+                # Which extractor has more files? - we'll take the best one
+                best_extractor = max(line_counts, key=line_counts.get).split('.')[-4]
+                if verbose:
+                    print(f"Distinct file counts: best extractor is", best_extractor)
+                msg = f"distinct_file_count_{best_extractor}"
+            else:
+                # Line counts are the same. Now check if the columns are different - we're going to take the unblob extraction
+                # at this point because we like it better for symlinks/perms
+                # We'll compare the first 100 lines of each tar tvf output
+                # If we find a difference, we'll record it and break
+                deltas = {k: False for k in col_names}
+                for i, col_type in enumerate(col_names):
+                    col_vals = {} # path -> col values
+
+                    for path, data in tar_result.items():
+                        col_vals[path] = [
+                                x.split()[i] for x in data if len(x.split()) > i
+                            ]
+
+                    # Are any cols different - if so, break - note we might not care as much about earlier differences
+                    # but we'll break on the first one we find.
+                    if len(set([tuple(col_vals[path]) for path in col_vals])) > 1:
+                        deltas[col_type] = True
+
+                if any(deltas.values()):
+                    msg = "distinct_" + "_".join([k for k, v in deltas.items() if v])
 
     # Report results, even if non-verbose
     print(f"Best extractor: {best_extractor} ({msg})" + (f" archive at {os.path.basename(outfile_base)}.rootfs.tar.gz" if best_extractor else ""))
