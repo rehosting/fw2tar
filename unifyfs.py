@@ -2,6 +2,7 @@ import tarfile
 import glob
 from copy import deepcopy
 from pathlib import Path, PurePath
+import subprocess
 from sys import argv
 import os
 import shutil
@@ -237,7 +238,58 @@ def unify(file_map):
 
     return best_scenario
 
-def render_mounts(mounts, output_tar_path="unified_filesystem.tar.gz"):
+def _tar_fs(rootfs_dir, tarbase):
+    # First, define the name of the uncompressed tar archive (temporary name)
+    uncompressed_outfile = tarbase + '.tar'
+    tar_command = [
+        "tar",
+        "-cf",
+        uncompressed_outfile,
+        "--sort=name",
+        "--mtime=UTC 2019-01-01",
+
+        #"--xattrs", # Introduces non-determinism
+
+        # Common binwalk artifacts:
+            "--exclude=0.tar",
+            "--exclude=squashfs-root",
+
+        # Unblob artifacts
+            "--exclude=*_extract",
+            "--exclude=*.uncompressed",
+            "--exclude=*.unknown",
+
+        # Don't want to take devices, permissions are a pain and tar complains about character devices
+            "--exclude=./dev",
+
+        "-C", str(rootfs_dir),
+        "."
+    ]
+
+    # We want the root directory: ./ to have consistent permissions
+    # we'll just set it to 755. NOT RECURSIVE
+    os.chmod(rootfs_dir, 0o755)
+
+    # Execute the tar command
+    tar_result = subprocess.run(tar_command, capture_output=True, text=True)
+    if tar_result.returncode != 0:
+        print(f"Error archiving root filesystem {rootfs_dir}: {tar_result.stderr}")
+        return
+
+    # Now, compress the tar archive using gzip with the --no-name option
+    # Output filename will be tarbase.tar.gz
+    gzip_command = ["gzip", "--no-name", "-f", uncompressed_outfile]
+
+    # Execute the gzip command
+    gzip_result = subprocess.run(gzip_command, capture_output=True, text=True)
+    if gzip_result.returncode != 0:
+        print(f"Error compressing tar archive {uncompressed_outfile}: {gzip_result.stderr}")
+        return
+
+    # Chmod the tar.gz file to 644
+    os.chmod(f"{uncompressed_outfile}.gz", 0o644)
+
+def render_mounts(mounts, output_tar_base=None):
     '''
     Given a dictionary of mount points like:
         ./: file1.tar.gz
@@ -247,37 +299,28 @@ def render_mounts(mounts, output_tar_path="unified_filesystem.tar.gz"):
     Produce a new tar archive that combines the input tar archives into a unified filesystem
     (archive) with this structure
     '''
+    if not output_tar_base:
+        output_tar_base = "unified"
 
     # Create a temporary directory for the unified filesystem
     root_dir = tempfile.mkdtemp()
 
     try:
+        # Step 1: Extract each tar file to its specified mount point
         for mount_point, file_path in mounts.items():
             extract_to = os.path.join(root_dir, mount_point.strip("./"))
-            os.makedirs(extract_to, exist_ok=True)
+            os.makedirs(extract_to, exist_ok=True)  # Ensure the target directory exists
             with tarfile.open(file_path, "r:gz") as tar:
                 tar.extractall(path=extract_to)
 
-        with tarfile.open(output_tar_path, "w:gz") as tar:
-            for dirpath, dirnames, filenames in os.walk(root_dir):
-                for dirname in dirnames:
-                    dir_full_path = os.path.join(dirpath, dirname)
-                    arcname = os.path.relpath(dir_full_path, start=root_dir)
-                    # Ensure we add the directory only, not its contents again
-                    tar.add(dir_full_path, arcname=arcname, recursive=False)
-                
-                for filename in filenames:
-                    file_path = os.path.join(dirpath, filename)
-                    arcname = os.path.relpath(file_path, start=root_dir)
-                    tar.add(file_path, arcname=arcname)
-
-
-        print(f"Unified tar archive created at: {output_tar_path}")
+        # Now use helper
+        _tar_fs(root_dir, output_tar_base)
+        print(f"Unified tar archive created at: {output_tar_base}.tar.gz")
     finally:
         # Step 3: Clean up the temporary directory
         shutil.rmtree(root_dir)
 
-def main(tarfile_base):
+def main(tarfile_base, unify_base=None):
 
     if tarfile_base.endswith(".tar.gz"):
         # Trim
@@ -292,11 +335,11 @@ def main(tarfile_base):
                 file_map[file][member.name] = member
 
     mounts = unify(file_map)
-    render_mounts(mounts)
+    render_mounts(mounts, unify_base)
 
 if __name__ == '__main__':
     if len(argv) < 1:
-        raise ValueError(f"USAGE {argv[0]}: <tarfile_base>")
+        raise ValueError(f"USAGE {argv[0]}: <tarfile_base> [unify_base]")
     
-    main(argv[1])
+    main(argv[1], argv[2] if len(argv) > 2 else None)
     

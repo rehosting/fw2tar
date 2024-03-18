@@ -3,8 +3,13 @@ import os
 import stat
 import subprocess
 import sys
+import re
 import tempfile
 import time
+import tarfile
+import shutil
+from copy import deepcopy
+from itertools import combinations, product
 from collections import defaultdict
 from multiprocessing import Process, Lock, Manager
 from pathlib import Path
@@ -13,6 +18,333 @@ EXTRACTORS=["unblob", "binwalk"]
 
 BAD_SUFFIXES = ['_extract', '.uncompressed', '.unknown', # Filename suffixes that show up as extraction artifacts
                 'cpio-root', 'squashfs-root', '0.tar'] # squashfs-root-* is special cased below
+
+BAD_MOUNTPOINTS  = ["tmp", "dev", "sys", "proc"]
+
+def logical_resolve(path, source=None):
+    """
+    Resolve a path (in the form of a string or a pathlib.Path object) into its
+    absolute form by logically handling '.' and '..' components.
+    This function does not access the filesystem.
+
+    If a source is provided, the path is resolved relative to the source path.
+    """
+    # Ensure path is a list of components if it's not already
+    if isinstance(path, str):
+        path = Path(path)
+    parts = list(path.parts)
+
+    if source is not None:
+        # Ensure source is a list of components if it's not already
+        if isinstance(source, str):
+            source = Path(source)
+        source_parts = list(source.parts)
+
+        # Prepend the source path to the path to resolve
+        parts = source_parts + parts
+
+    resolved_parts = []
+    for part in parts:
+        if part == '..':
+            if resolved_parts:
+                resolved_parts.pop()  # Go up one directory level
+        elif part not in ('', '.', '/'):
+            resolved_parts.append(part)  # Add actual directory/file name
+
+    # Reconstruct the path from the resolved parts
+    resolved_path = Path(*resolved_parts)
+    
+    # Ensure the path is absolute
+    if not path.is_absolute():
+        resolved_path = Path("/") / resolved_path
+
+    return resolved_path
+
+def realize_fs(mount_points, file_map):
+    '''
+    Given a dictionary of mount points in the form {"./": "filename", "./mnt": "filename2", ...}
+    and a dictionary of file_map in the form {"filename": {path -> member info}, ...},
+    combine them as specified in mount_points to  produce a new fs dictionary
+    '''
+    mount_fs = {}
+    for mount_point, infile in mount_points.items():
+        assert(mount_point.endswith("/"))
+        for path, detail in file_map[infile].items():
+            mount_fs[mount_point + path[2:]] = detail
+    return mount_fs
+
+
+def calculate_score(mount_fs, report=False):
+    '''
+    Count the number of files and *resolveable* symlinks in mount_fs with its current layout
+    '''
+
+    total_files = len([name for name, member in mount_fs.items() if not member.issym()])
+    dangling_link_targets = set()
+
+    # Now let's look at each symlink
+    for name, member in {name: member for name, member in mount_fs.items() if member.issym()}.items():
+        # Can we resolve this symlink?
+        target = member.linkname
+        if target.startswith("/") or target.startswith("./"):
+            target = str(logical_resolve(target))
+        else:
+            parent = name
+            if parent.endswith("/"):
+                parent = parent[:-1]
+            parent = "/".join(parent.split("/")[:-1])
+            target = str(logical_resolve(target, parent))
+            #print("Relative symlink", name, raw_target, target)
+
+        if target.startswith("/"):
+            target = "." + target
+        elif not target.startswith("./"):
+            target = "./" + target
+
+
+        if any(target.startswith("./" + x) for x in BAD_MOUNTPOINTS):
+            continue
+
+        if target not in mount_fs:
+            dangling_link_targets.add(target)
+            if report:
+                print(f"Dangling link: {name} -> {target}")
+            continue
+        total_files += 1
+
+    return total_files, dangling_link_targets
+
+def sanitize_path(this_path, trailing_slash = False):
+    '''
+    Ensure path starts with ./
+    If trailing_slash is True, ensure path ends with a /
+    '''
+    if trailing_slash and not this_path.endswith("/"):
+        this_path += "/"
+
+    if this_path.startswith("/"):
+        this_path = "." + this_path
+    elif not this_path.startswith("./"):
+        this_path = "./" + this_path
+    return this_path
+
+
+def check_mountpoint(this_path, mount_points, realized_fs):
+    if this_path in mount_points:
+        return False
+
+    # Check if this path exists in our filesystem - it must exist as an empty directory
+    mountpoint = None
+    if this_path not in realized_fs:
+        if this_path.endswith("/"):
+            this_path = this_path[:-1]
+            if this_path in realized_fs:
+                mountpoint = realized_fs[this_path]
+    else:
+        mountpoint = realized_fs[this_path]
+
+    if not mountpoint:
+        #print(f"Skipping {this_path} - not in realized_fs")
+        return False
+
+    # Is this a non-empty directory?
+    if len([x for x in realized_fs if x.startswith(this_path+"/")]) > 1:
+        return False
+
+    if mountpoint.issym():
+        # Follow the symlink
+        new_path = sanitize_path(mountpoint.linkname)
+        return check_mountpoint(new_path, mount_points, realized_fs)
+
+    return True
+
+def find_best_score(mount_points, file_map):
+    if not len(mount_points):
+        return mount_points, 0
+
+    realized_fs = realize_fs(mount_points, file_map)
+
+    best_score, dangling_link_targets = calculate_score(realized_fs)
+    best_mount_points = mount_points
+    found_improvement = False
+
+    # Let's test each mount point to find the best (or none)
+    # If we find a best, recurse (greedy), otherwise return
+    # For each dangling link, try to resolve it using any unmounted fs
+    for dangling_link in dangling_link_targets:
+        for other_file in file_map:
+            if other_file in mount_points.values():
+                continue
+            other_files = file_map[other_file]
+
+            # For each parent directory of dangling_link, check if we could mount other_files there
+            for idx in range(len(dangling_link.split("/"))-1):
+                this_path = sanitize_path("/".join(dangling_link.split("/")[:idx+1]), trailing_slash=True)
+
+                if not check_mountpoint(this_path, mount_points, realized_fs):
+                    # Invalid mount point - has files, isn't present, etc
+                    continue
+                residual = sanitize_path("/".join(dangling_link.split("/")[idx+1:]))
+                if residual in other_files:
+                    # We can mount other_files at this_path to resolve dangling_link
+                    # Let's calculate the new score
+                    new_mount_points = deepcopy(mount_points)
+                    new_mount_points[this_path] = other_file
+
+                    new_fs = realize_fs(new_mount_points, file_map)
+                    this_score, new_dangles = calculate_score(new_fs)
+
+                    # One final filter - if we just added more files, but didn't actually resolve anything in particular we knew about, this is probably wrong
+                    # Ensure we've removed at least one dangling link. But we could've added new dangles too
+                    resolved = set()
+                    for x in dangling_link_targets:
+                        if x in new_fs:
+                            resolved.add(x)
+
+                    if not len(resolved):
+                        continue
+
+                    if this_score > best_score or (this_score == best_score and len(str(best_mount_points.keys())) > len(str(new_mount_points.keys()))):
+                        # If we have a tie, select the shorter mount string i.e., higher in the FS
+                        found_improvement = True
+                        this_mount_points, this_score = find_best_score(new_mount_points, file_map)
+                        if this_mount_points is not None:
+                            best_mount_points = this_mount_points
+                            best_score = this_score
+                        
+
+    if not found_improvement:
+        # We didn't find a better mount point, so return
+        return best_mount_points, best_score
+
+    # Recurse
+    return find_best_score(best_mount_points, file_map)
+
+def is_valid_rootfs(scenario, file_map):
+    # Given a scenario, ensure it's a valid rootfs
+    # by checking for a set of required directories and files
+    # and ensuring at least some executables are present
+
+    key_dirs = {'bin', 'etc', 'lib', 'usr', 'var', 'tmp'}
+    critical_files = {'bin/sh', 'etc/passwd'}
+    min_required = 2 # Just find something
+    found = 0
+
+    for d in key_dirs:
+        # First assume ./ -> file and look that up in file_map
+        root = file_map[scenario['./']]
+        if "./{d}/" in root or f"./{d}" in root:
+            found += 1
+        elif f"./{d}/" in scenario:
+            found += 1
+
+    # For each critical file, check if it's present - first check if dir is a symlink/mount
+    for f in critical_files:
+        d = f.split("/")[0]
+        f = f.split("/")[1]
+
+        if f"./{d}/{f}" in file_map[scenario['./']]:
+            # Mounted in rootfs
+            found += 1
+
+        elif f"./{d}" in scenario:
+            # Mounted dir - check other file_map
+            if f"./{f}" in file_map[scenario[f"./{d}/"]]:
+                found += 1
+    return found >= min_required
+
+
+
+def find_referenced_paths(tarnames):
+    '''
+    Look through every file in each tar archive to identify Linux paths with at least 2 slashes. 
+    This function attempts to handle both text and binary files by looking for paths in the binary data.
+    Paths are required to have at least 2 slashes to be considered.
+    Returns a set of unique paths found across all specified tar archives.
+    '''
+ 
+    # Regex to match Linux paths with at least 2 slashes and excluding specific characters
+    path_regex = re.compile(rb'/[^/\0\n<>"\'! :\?]+(?:/[^/\0\n<>()%"\'! ;:\?]+)+')
+
+    # Pattern to detect if a match is immediately preceded by a common network protocol
+    protocol_pattern = rb'(?:http|ftp|https)://'
+    
+    referenced_paths = set()
+
+    for tarname in tarnames:
+        with tarfile.open(tarname, "r:*") as tar:
+            for member in tar.getmembers():
+                if member.isfile():
+                    file_contents = tar.extractfile(member).read()
+                    # Find all matches in the file, considering it as binary data
+                    for match in re.findall(path_regex, file_contents):
+                        # Check if the match is part of a network protocol pattern
+                        if not re.search(protocol_pattern + re.escape(match), file_contents):
+                            try:
+                                # Attempt to decode binary match to string
+                                decoded_path = match.decode('utf-8')
+
+                                if any(decoded_path.startswith("/"+x) for x in BAD_MOUNTPOINTS):
+                                    continue
+
+                                if " " in decoded_path:
+                                    continue
+
+                                if decoded_path.endswith(".c"):
+                                    # common reference to source code
+                                    continue
+
+                                referenced_paths.add(decoded_path)
+                            except UnicodeDecodeError:
+                                # Ignore decoding errors, as we might encounter binary paths or non-text content
+                                pass
+
+    return referenced_paths
+    
+def solve_unification(file_map, verbose=False):
+    '''
+    File map maps input files -> {path -> member info}
+    Our goal here is to find an arrangement of file systems mounted into existing directories such that
+    we get the maximum number of files
+    '''
+    # Our goal now is to find the biggest filesystem based on number of files that's a valid rootfs
+    best_scenario = None
+    best_score = 0
+
+    # First do a static pass through file_map to identify referenced paths
+    #referenced_paths = find_referenced_paths(list(file_map.keys()))
+    #print(f"Referenced paths: {len(referenced_paths)}")
+    #for p in referenced_paths:
+    #    print(p)
+
+    # Start from each filesystem and search for the best scenario where it's the root
+    for root_file in file_map.keys():
+        scenario, score = find_best_score({"./": root_file}, file_map)
+
+        if not is_valid_rootfs(scenario, file_map):
+            if verbose:
+                print(f"Skipping scenario {scenario} with score {score} as it's not a valid rootfs")
+            continue
+
+        if score > best_score:
+            best_scenario = scenario
+            best_score = score
+
+    if not best_scenario:
+        return None
+
+    # Realize the best scenario
+    realized_fs = realize_fs(best_scenario, file_map)
+
+    # Print or return the best scenario
+    if verbose:
+        print(f"Best unification scenario with {len(best_scenario)} filesystems has score {best_score}")
+        for mount_point, file in best_scenario.items():
+            print(f"\tMount {file} at {mount_point}")
+
+        calculate_score(realized_fs, report=True)
+
+    return best_scenario
 
 def get_dir_size_exes(path):
     '''
@@ -36,6 +368,7 @@ def get_dir_size_exes(path):
                 total_executables += 1
             try:
                 total_size += entry.stat().st_size
+
             except FileNotFoundError as e:
                 print(f"Unexpected FileNotFoundError: {e}")
                 continue
@@ -73,70 +406,57 @@ def count_executable_files(path):
                 count += 1
     return count
 
-def find_linux_filesystems(start_dir, min_executables=10, extractor=None, verbose=False):
+def is_linux_rootfs(start_dir : Path):
     key_dirs = {'bin', 'etc', 'lib', 'usr', 'var'}
     critical_files = {'bin/sh', 'etc/passwd'}
     min_required = (len(key_dirs) + len(critical_files)) // 2  # Minimum number of key dirs and files
 
-    filesystems = defaultdict(lambda: {'score': 0, 'size': 0, 'path': '', 'nfiles': 0, 'executables': 0})
+    # Check how many of the key directories are present
+    present_dirs = set()
+    for d in key_dirs:
+        if (start_dir / d).is_dir():
+            present_dirs.add(d)
+    
+    # Check how many of the critical files are present
+    present_files = set()
+    for f in critical_files:
+        if (start_dir / f).exists():
+            present_files.add(f)
+
+    return (len(present_dirs) + len(present_files)) >= min_required
+
+def find_extractions(start_dir, min_executables=10, extractor=None, verbose=False):
+    filesystems = defaultdict(lambda: {'score': 0, 'size': 0, 'path': '', 'nfiles': 0, 'is_root': False, 'executables': 0})
 
     for root, dirs, files in os.walk(start_dir):
         root_path = Path(root)
 
-        matched_dirs = key_dirs.intersection(set(dirs))
-        matched_files = set()
-        for critical_file in critical_files:
-            if (root_path / critical_file.split('/')[-1]).exists():
-                matched_files.add(critical_file)
+        # Name must end with _extract for us to treat it as a root extraction (unblob)
+        if (extractor == "unblob" and not root_path.name.endswith('_extract')):
+            continue
 
-        total_matches = len(matched_dirs) + len(matched_files)
-        if total_matches >= min_required:
-            size, nfiles, executables = get_dir_size_exes(root_path)
+        size, nfiles, executables = get_dir_size_exes(root_path)
 
-            if executables < min_executables:
-                if verbose:
-                    print(f"Warning {extractor if extractor else ''}: {executables} executables < {min_executables} required on analysis of FS {root_path} with size {size:,}")
-                continue
+        if nfiles == 0:
+            # Skip empty extraction
+            continue
 
-            filesystems[str(root_path)].update({'score': total_matches, 'size': size, 'nfiles': nfiles, 'path': str(root_path), 'executables': executables})
-        #elif total_matches > 0 and verbose:
-            #print(f"{extractor if extractor else ''} found {total_matches} matches in {root_path} but not enough for a filesystem")
+        is_root = is_linux_rootfs(root_path)
+        if is_root and executables < min_executables:
+            # Expect rootfs to have at least 10 executables - skip (bad extract?)
+            print(f"Skipping potential rootfs {root_path} with {nfiles} files as it only has {executables} executables")
+            continue
 
-    # Filesystems will only have values if they met the minimum requirements
-    # Now we rank by highest # executables with size and then score as tie breakers
-    ranked_filesystems = sorted(filesystems.values(), key=lambda x: (-x['executables'], -x['size'], -x['score']))
+        filesystems[str(root_path)].update({'size': size, 'nfiles': nfiles, 'path': str(root_path), 'is_root': is_root, 'executables': executables})
+
+    ranked_filesystems = sorted(filesystems.values(), key=lambda x: (-x['is_root'], -x['executables'], -x['size'], -x['score']))
 
     if verbose:
         for fs in ranked_filesystems:
-            print(f"{extractor if extractor else ''} found filesystem: {fs['path']} with {fs['nfiles']:,} files, {fs['size']:,} bytes, {fs['executables']} executables")
+            friendly_path = fs['path'].replace(start_dir, '')
+            print(f"{extractor if extractor else ''} found filesystem: {friendly_path} with {fs['nfiles']:,} files, {fs['size']:,} bytes, {fs['executables']} executables")
 
-    return [(Path(fs['path']), fs['size'], fs['nfiles']) for fs in ranked_filesystems]
-
-def find_all_filesystems(start_dir, other_than=None):
-    '''
-    Find every non-empty extracted filesystem, except those in other_than list.
-    Returns a sorted list based on number of files (descending order).
-    '''
-    # Initialize filesystems with defaultdict
-    filesystems = defaultdict(lambda: {'size': 0, 'nfiles': 0, 'path': ''})
-
-    for root, dirs, files in os.walk(start_dir):
-        root_path = Path(root)
-
-        # Check if the current directory is not in the exclusion list and ends with '_extract'
-        if root_path.name.endswith('_extract') and root_path not in (other_than or []):
-            size, nfiles, _ = get_dir_size_exes(root_path) # Don't care about executables
-            if size == 0:
-                continue
-            filesystems[str(root_path)].update({'size': size, 'nfiles': nfiles, 'path': str(root_path)})
-            print(f"Found non-root filesystem: {root_path} with {nfiles:,} files, {size:,} bytes")
-
-    # Convert the filesystems to a list of tuples and sort them by the number of files
-    sorted_filesystems = sorted(filesystems.values(), key=lambda x: x['nfiles'], reverse=True)
-
-    # Return list of tuples (Path, size, nfiles) for each filesystem
-    return [(Path(fs['path']), fs['size'], fs['nfiles']) for fs in sorted_filesystems]
-
+    return ranked_filesystems
 
 def _tar_fs(rootfs_dir, tarbase):
     # First, define the name of the uncompressed tar archive (temporary name)
@@ -213,292 +533,76 @@ def _extract(extractor, infile, extract_dir, log_file):
         print(f"Error running {extractor}: {e.returncode}\nstdout: {e.stdout}\nstderr: {e.stderr}")
         raise e
 
-def collect_symlinks(root, base_root = None):
-    if base_root is None:
-        base_root = root
-    symlink_targets = set()
-
-    for entry in root.iterdir():
-        if any([entry.name.endswith(x) for x in BAD_SUFFIXES]):
-            continue
-        if entry.name.startswith('squashfs-root-') or entry.name.startswith("cpio-root-"):
-            # Special case of bad suffixes
-            continue
-        if entry.is_symlink():
-
-            if entry.resolve(strict=False).exists():
-                # Symlink points to something that exists - must be in the same filesystem
-                continue
-
-            # If it's relative:
-            if entry.is_absolute():
-                target = entry.resolve(strict=False)
-                for parent in target.parents:
-                    if parent.exists():
-                        break
-                else:
-                    # Never found a parent. Should never happen - there should always be an extraction dir
-                    raise ValueError(f"Could not find a parent for {target}, {entry}")
-
-                # We have parent now, strip from entry
-                symlink_targets.add(target.relative_to(parent).as_posix())
-
-            else:
-                print(f"RELATIVE: TODO?", entry)
-        elif entry.is_dir():
-            symlink_targets.update(collect_symlinks(entry, base_root))
-    return symlink_targets
-
-def find_best_mount_point(mountable_fs, missing_paths, verbose):
-    best_mount_point = None
-    max_resolved = 0
-
-    # A dictionary to track the number of resolved paths for each mount point
-    mount_point_efficiency = {}
-
-    for (src_root, missing_path) in missing_paths:
-        if mountable_fs == src_root:
-            # Don't use the same FS
-            continue
-        path_components = missing_path.strip("/").split('/')
-
-        for i in range(1, len(path_components)):
-            this_mountpoint = "/".join(path_components[:i])
-            resolved = set()
-
-            # Check if mounting at this_mountpoint resolves any missing path
-            if missing_path.startswith(this_mountpoint):
-                relative_path = missing_path[len(this_mountpoint):].strip("/")
-                potential_resolved_path = mountable_fs / relative_path
-                if potential_resolved_path.exists():
-                    resolved.add(relative_path)
-
-            # Update the dictionary with the number of resolved paths for this mount point
-            if len(resolved):
-                if this_mountpoint not in mount_point_efficiency:
-                    mount_point_efficiency[this_mountpoint] = len(resolved)
-                else:
-                    mount_point_efficiency[this_mountpoint] += len(resolved)
-
-                # Check if this is the best mount point so far
-                if mount_point_efficiency[this_mountpoint] > max_resolved:
-                    best_mount_point = this_mountpoint
-                    max_resolved = mount_point_efficiency[this_mountpoint]
-
-    if verbose and best_mount_point:
-        print(f"Best mounting {mountable_fs} at /{best_mount_point} resolves {max_resolved} missing paths")
-
-    return best_mount_point, max_resolved
-
-def unify_filesystems(extract_dir, rootfs_choices, verbose):
+def render_mounts(mounts, output_tar_base, scratch_dir="/tmp"):
     '''
-    Given multiple filesystems, try to identify if they point into each other.
-    For example if one filesystem has a symlink pointing to /mnt/data/foo which doesn't
-    exist, and a second filesystem has data/foo, we'll report that the 2nd filesystem
-    can be mounted at /mnt.
+    Given a dictionary of mount points like:
+        ./: file1.tar.gz
+        ./mnt/: file2.tar.gz
+        ./mnt/othermnt: file3.tar.gz
+
+    Produce a new tar archive that combines the input tar archives into a unified filesystem
+    (archive) with this structure
     '''
-    # Within each extracted filesystem, check if there are dangling symlinks.
+    root_dir = tempfile.mkdtemp(dir=scratch_dir)
+    try:
+        # Extract each tar file to its specified mount point
+        for mount_point, file_path in mounts.items():
+            extract_to = os.path.join(root_dir, mount_point.strip("./"))
+            os.makedirs(extract_to, exist_ok=True)  # Ensure the target directory exists
+            with tarfile.open(file_path, "r:gz") as tar:
+                tar.extractall(path=extract_to)
 
-    missing_paths = set()
+        # Now use helper to compress the whole thing
+        _tar_fs(root_dir, output_tar_base)
+        print(f"Unified tar archive created at: {output_tar_base}.tar.gz with {len(mounts)} filesystems")
+    finally:
+        shutil.rmtree(root_dir)
 
-    for root, _, _ in rootfs_choices:
-        print(root.relative_to(extract_dir))
-        links  = collect_symlinks(root)
-        for l in links:
-            missing_paths.add((root, l))
-
-    # TODO: what if 2nd filesystem gets first mounted into it and that's best - not sure how to handle yet
-    if len(missing_paths) > 1:
-        print(f"Found {len(missing_paths)} missing paths")
-
-        for root, _, _ in rootfs_choices:
-            find_best_mount_point(root, missing_paths, verbose)
-
-
-def extract_and_process(extractor, infile, outfile_base, scratch_dir, start_time, verbose, primary_limit,
-                        secondary_limit, results, results_lock):
+def extract_and_process(extractor, infile, outfile_base, scratch_dir, verbose):
     with tempfile.TemporaryDirectory(dir=scratch_dir) as extract_dir:
         log_file = f"{outfile_base}.{extractor}.log"
-        # Running the appropriate extractor
+        start_time = time.time()
         _extract(extractor, infile, Path(extract_dir), log_file)
         post_extract = time.time()
         if verbose:
             print(f"{extractor} complete after {post_extract - start_time:.2f}s")
 
-        rootfs_choices = find_linux_filesystems(extract_dir, extractor=extractor, verbose=verbose)
+        # TODO: Grep within extract dir to find filesystem references in all extracted files
+        # We'll use this later during unification as a set of inputs
 
-        if len(rootfs_choices) > 1:
-            unify_filesystems(extract_dir, rootfs_choices, verbose)
+        # Collect all filesystems and archive each
+        all_filesystems = find_extractions(extract_dir, min_executables=0, extractor=extractor, verbose=verbose)
+        if verbose:
+            print(f"Found {len(all_filesystems)} filesystems")
 
-        if not len(rootfs_choices) and verbose:
-            print(f"No Linux filesystems found extracting {infile} with {extractor}")
+        if len(all_filesystems) == 0:
+            print(f"No filesystems found in {infile} - aborting")
             return
 
-        for idx, (root, size, nfiles) in enumerate(rootfs_choices):
-            if idx >= primary_limit:
-                break
+        # Create tar archives for each identified filesystem
+        for idx, fs in enumerate(all_filesystems):
             tarbase = f"{outfile_base}.{extractor}.{idx}"
-            if verbose:
-                print(f"Archiving {root} as {tarbase}.tar.gz")
-            _tar_fs(root, tarbase)
+            _tar_fs(fs['path'], tarbase)
+            #archive_hash = subprocess.run(["sha1sum", f"{tarbase}.tar.gz"], capture_output=True, text=True).stdout.split()[0]
 
-            archive_hash = subprocess.run(["sha1sum", f"{tarbase}.tar.gz"], capture_output=True, text=True).stdout.split()[0]
-            with results_lock:
-                results.append((extractor, idx, size, nfiles, True, archive_hash))
+        file_map = {}
+        for idx, fs in enumerate(all_filesystems):
+            file = f"{outfile_base}.{extractor}.{idx}.tar.gz"
+            file_map[file] = {}
+            with tarfile.open(file, "r:gz") as tar:
+                for member in tar.getmembers():
+                    file_map[file][member.name] = member
 
-        if secondary_limit > 0:
-            # Now find non-Linux filesystems, anything except rootfs_choices
-            other_filesystems = find_all_filesystems(extract_dir, other_than=[x[0] for x in rootfs_choices])
+        mounts = solve_unification(file_map, verbose=verbose)
+        if not mounts:
+            print(f"Could not unify {len(all_filesystems)} filesystems to produce a valid rootfs")
+            return
 
-            if verbose:
-                print(f"Found {len(other_filesystems)} non-root filesystems")
-
-            for idx, (root, size, nfiles) in enumerate(other_filesystems):
-                if idx >= secondary_limit:
-                    break
-                tarbase = f"{outfile_base}.{extractor}.nonroot.{idx}"
-                _tar_fs(root, tarbase)
-
-                with results_lock:
-                    results.append((extractor, idx, size, nfiles, False))
-
-
-def monitor_processes(processes, results, max_wait=600, follow_up_wait=600):
-    '''
-    We'll wait up to max_wait for *any* result. After we have a result, we'll only wait
-    up to follow_up_wait for all processes to complete. If they don't, we'll terminate them.
-    '''
-
-    start_time = time.time()
-    while True:
-        if (time.time() - start_time) > max_wait or (results and (time.time() - start_time) > follow_up_wait):
-            for p in processes:
-                if p.is_alive():
-                    print(f"Terminating {p.name}...")
-                    p.terminate()
-            break
-        if all(not p.is_alive() for p in processes):
-            # All processes completed within the time frame
-            break
-        time.sleep(5)
-
-def main(infile, outfile_base, scratch_dir="/tmp", extractors=None, verbose=False, primary_limit=1, secondary_limit=0):
-    # Launching both extraction processes in parallel
-    processes = []
-    manager = Manager()
-    results = manager.list()
-    results_lock = Lock()
-    start_time = time.time()
-
-    for extractor in extractors:
-        if verbose:
-            print(f"Starting {extractor} extraction...")
-        p = Process(target=extract_and_process, args=(extractor, infile, outfile_base,
-                                                      scratch_dir, start_time, verbose,
-                                                      primary_limit, secondary_limit,
-                                                      results, results_lock))
-        p.name = f"{extractor} extraction"
-        processes.append(p)
-        p.start()
-
-    # Wait for both processes to complete
-    monitor_processes(processes, results)
-
-    # Note we no longer need results_lock because we're back to a single process
-
-    best_hashes = {} # extractor -> hash of best filesystem
-    for (extractor, idx, size, nfiles, root, archive_hash) in results:
-        if idx == 0:
-            best_hashes[extractor] = archive_hash
-
-    if verbose:
-        for (extractor, idx, size, nfiles, root, archive_hash) in sorted(results, key=lambda x: (x[4], x[2]), reverse=True):
-            if root and idx == 0:
-                best_hashes[extractor] = archive_hash
-            if verbose:
-                if root:
-                    print(f"\t{archive_hash}: {extractor: <10} primary #{idx}: {nfiles:,} files, {size:,} bytes.")
-                else:
-                    print(f"\t{archive_hash}: {extractor} secondary #{idx}: {nfiles:,} files, {size:,} bytes")
-
-    # Compare results, if we only have one, take it. Otherwise prioritize unblob.
-    # Avoid storing duplicates of identical filesystem.
-    # Store best results at {input_base}.rootfs.tar.gz, others at {input_base}.{extractor}.0.tar.gz
-
-    col_names = ['permissions', 'ownership', 'size', 'date', 'time', 'path', 'issymlink', 'symlinkdest']
-
-    best_extractor = None
-    if len(best_hashes) == 0:
-        # No extractors found anything
-        msg = "nofs"
-    elif len(best_hashes) == 1:
-        # Only one extractor worked
-        best_extractor = list(best_hashes.keys())[0]
-        msg = f"only_{best_extractor}"
-    else:
-        # Multiple extractors found something
-        best_extractor = "unblob"
-        if len(set(best_hashes.values())) == 1:
-            msg = "identical"
-        else:
-            # Results are distinct, but exist. Figure out why
-            msg = "distinct_hash"
-            paths = [f"{outfile_base}.{extractor}.0.tar.gz" for extractor in best_hashes.keys()]
-            # Run tar tvf on each path - check if total number of lines is different -> different number of files
-            # or check if columns are different: permissions, owner, group, size, date
-            # Record the type of difference
-            tar_result = {}
-            for path in paths:
-                tar_result[path] = subprocess.check_output(["tar", "tvf", path]).decode("utf-8", errors="ignore").splitlines()
-
-            # First check: are line counts different?
-            line_counts = {path: len(tar_result[path]) for path in paths}
-            if len(set(line_counts.values())) > 1:
-                # Which extractor has more files? - we'll take the best one
-                best_extractor = max(line_counts, key=line_counts.get).split('.')[-4]
-                if verbose:
-                    print(f"Distinct file counts: best extractor is", best_extractor)
-                msg = f"distinct_file_count_{best_extractor}"
-            else:
-                # Line counts are the same. Now check if the columns are different - we're going to take the unblob extraction
-                # at this point because we like it better for symlinks/perms
-                # We'll compare the first 100 lines of each tar tvf output
-                # If we find a difference, we'll record it and break
-                deltas = {k: False for k in col_names}
-                for i, col_type in enumerate(col_names):
-                    col_vals = {} # path -> col values
-
-                    for path, data in tar_result.items():
-                        col_vals[path] = [
-                                x.split()[i] for x in data if len(x.split()) > i
-                            ]
-
-                    # Are any cols different - if so, break - note we might not care as much about earlier differences
-                    # but we'll break on the first one we find.
-                    if len(set([tuple(col_vals[path]) for path in col_vals])) > 1:
-                        deltas[col_type] = True
-
-                if any(deltas.values()):
-                    msg = "distinct_" + "_".join([k for k, v in deltas.items() if v])
-
-    # Report results, even if non-verbose
-    print(f"Best extractor: {best_extractor} ({msg})" + (f" archive at {os.path.basename(outfile_base)}.rootfs.tar.gz" if best_extractor else ""))
-
-    # Write msg into a file. Only if we have multiple extractors - if we just have one the results is either output exists/no output exists
-    if len(extractors) > 1:
-        with open(f"{outfile_base}.txt", "w") as f:
-            f.write(msg+"\n")
-
-    # If we have a best_extractor, we can rename the file and delete the others
-    if best_extractor:
-        best_filename = f"{outfile_base}.{best_extractor}.0.tar.gz"
-        os.rename(best_filename, f"{outfile_base}.rootfs.tar.gz")
-
-        # If filesystems were identical we can delete the others. Otherwise we'll leave them for the user to inspect
-        if msg == "identical":
-            for other_extractor in best_hashes.keys():
-                if other_extractor != best_extractor:
-                    os.remove(f"{outfile_base}.{other_extractor}.0.tar.gz")
+        render_mounts(mounts, f"{outfile_base}.rootfs", scratch_dir)
+        # Report mounts into .txt output
+        with open(f"{outfile_base}.mounts.txt", "w") as f:
+            for mount_point, file in mounts.items():
+                f.write(f"{mount_point}: {file}\n")
 
 if __name__ == "__main__":
     os.umask(0o000)
@@ -510,18 +614,10 @@ if __name__ == "__main__":
     parser.add_argument("infile", type=str, help="Input file")
     parser.add_argument("outfile", nargs='?', type=str, help="Output file base (optional). Default is infile without extension.")
     parser.add_argument("scratch_dir", nargs='?', default="/tmp/", type=str, help="Scratch directory (optional). Default /tmp")
-    parser.add_argument("--extractors", type=str, help=f"Comma-separated list of extractors. Supported values are {' '.join(EXTRACTORS)}", default="default_extractor")
     parser.add_argument("--verbose", action='store_true', help="Enable verbose output")
-    parser.add_argument("--primary_limit", type=int, default=1, help="Maximum number of root-like filesystems to extract. Default 1")
-    parser.add_argument("--secondary_limit", type=int, default=0, help="Maximum number of non-root-like filesystems to extract. Default 0")
     parser.add_argument("--force", action='store_true', help="Overwrite existing output file")
 
     args = parser.parse_args()
-
-    if args.extractors == "default_extractor":
-        args.extractors = EXTRACTORS
-    else:
-        args.extractors = args.extractors.split(',')
 
     if not args.outfile:
         # Filename without extension by default
@@ -535,6 +631,4 @@ if __name__ == "__main__":
         else:
             os.remove(args.outfile + ".rootfs.tar.gz")
 
-    main(args.infile, args.outfile, scratch_dir=args.scratch_dir,
-         extractors=args.extractors, verbose=args.verbose,
-         primary_limit=args.primary_limit, secondary_limit=args.secondary_limit)
+    extract_and_process("unblob", args.infile, args.outfile, args.scratch_dir, args.verbose)
