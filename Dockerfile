@@ -52,7 +52,7 @@ RUN apt-get update && \
 RUN pip install --upgrade pip && \
     python3 -m pip install \
       git+http://github.com/jrspruitt/ubi_reader.git@v0.8.5-master \
-      git+https://github.com/AndrewFasano/binwalk.git \
+      git+https://github.com/rehosting/binwalk.git \
       git+https://github.com/ahupp/python-magic \
       git+https://github.com/devttys0/yaffshiv.git \
       git+https://github.com/marin-m/vmlinux-to-elf \
@@ -79,7 +79,7 @@ RUN git clone --depth=1 https://github.com/davidribyrne/cramfs.git /cramfs && \
    cd /cramfs && make && make install
 
 # Clone unblob fork then install with poetry
-RUN git clone --depth=1 https://github.com/AndrewFasano/unblob.git /unblob
+RUN git clone --depth=1 https://github.com/rehosting/unblob.git /unblob
 RUN cd /unblob && poetry install --no-dev
 
 # Explicitly install unblob deps - mostly captured above, but some of the .debs get updated and installed via curl
@@ -90,7 +90,7 @@ RUN sh -c /unblob/unblob/install-deps.sh
 # Use sed to rewrite our soruces.list so we can get build-deps
 RUN sed -i 's/^# deb-src/deb-src/' /etc/apt/sources.list
 RUN apt-get update && apt-get build-dep -y fakeroot
-RUN git clone https://github.com/AndrewFasano/fakeroot.git /fakeroot
+RUN git clone https://github.com/rehosting/fakeroot.git /fakeroot
 RUN cd /fakeroot && ./bootstrap && ./configure && make && make install -k || true
 
 # Patch to fix unblob #767 that hasn't yet been upstreamed. Pip install didn't work. I don't understand poetry
