@@ -33,7 +33,7 @@ where altering file ownership or permissions could undermine the integrity of an
 Ensure Docker is installed on your system, then download the container from GitHub:
 
 ```sh
-docker pull ghcr.io/andrewfasano/fw2tar:main
+docker pull rehosting/fw2tar:latest
 ```
 
 #### Extract Firmware
@@ -43,7 +43,7 @@ Replace `/path/to/your/firmware.bin` with the actual path to your firmware file:
 export INPUT_FILE=/path/to/your/firmware.bin
 docker run --rm -it \
     -v $(dirname $INPUT_FILE):/host \
-    ghcr.io/andrewfasano/fw2tar:main \
+    rehosting/fw2tar:latest \
     fakeroot python3 /fw2tar.py /host/$(basename $INPUT_FILE)
 ```
 
@@ -54,8 +54,8 @@ Ensure you have Git and Docker installed, then:
 
 #### Clone and build the container
 ```sh
-git clone https://github.com/AndrewFasano/fw2tar.git
-docker build -t fw2tar fw2tar/
+git clone https://github.com/rehosting/fw2tar.git
+docker build -t rehosting/fw2tar:latest fw2tar
 ```
 
 #### Extract Firmware
@@ -75,11 +75,11 @@ On a system where you have root permissions, clone this repository and
 then build `fw2tar.sif` using `./build_singularity.sh`, or manually with:
 
 ```sh
-docker build -t fw2tar .
+docker build -t rehosting/fw2tar:latest .
 docker run -v /var/run/docker.sock:/var/run/docker.sock \
     -v $(pwd):/output \
     --privileged -t \
-    --rm quay.io/singularity/docker2singularity:v3.9.0 fw2tar
+    --rm quay.io/singularity/docker2singularity:v3.9.0 rehsoting/fw2tar
 mv fw2tar*.sif fw2tar.sif
 ```
 
@@ -103,7 +103,7 @@ To compare filesystems generated with binwalk and unblob, use the `diff_archives
 
 ## Extractor Forks
 To accomplish its goals, we maintain slightly-modified forks of both [unblob](https://github.com/onekey-sec/unblob/) and [binwalk](https://github.com/ReFirmLabs/binwalk).
-- [unblob fork](https://github.com/andrewfasano/unblob): forked to preserve permissions and handle symlinks.
-- [binwalk fork](https://github.com/andrewfasano/binwalk): forked to better support ubifs extraction.
+- [unblob fork](https://github.com/rehosting/unblob): forked to preserve permissions and handle symlinks.
+- [binwalk fork](https://github.com/rehosting/binwalk): forked to better support ubifs extraction.
 
 We express our gratitude to the developers of these tools for their hard work that makes `fw2tar` possible.
