@@ -4,7 +4,7 @@ set -eu
 # Function to display usage
 usage() {
     echo "$0 is a simple shell wrapper around a dockerized fw2tar.py with the following usage:"
-    docker run --rm fw2tar python3 /fw2tar.py --help
+    docker run --rm rehosting/fw2tar:latest python3 /fw2tar.py --help
     exit 1
 }
 
@@ -56,7 +56,7 @@ if [ ! -z "$OUTFILE" ]; then
 fi
 
 # Finalize Docker command with input file and other arguments
-DOCKER_CMD+=" fw2tar fakeroot python3 /fw2tar.py \"/hostin/${IN_FILE_BASENAME}\" ${OTHER_ARGS[*]}"
+DOCKER_CMD+=" rehosting/fw2tar:latest fakeroot python3 /fw2tar.py \"/hostin/${IN_FILE_BASENAME}\" ${OTHER_ARGS[*]}"
 
 # Execute the Docker command
 eval $DOCKER_CMD
