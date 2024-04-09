@@ -10,6 +10,9 @@ import time
 from collections import defaultdict
 from multiprocessing import Process, Lock, Manager
 from pathlib import Path
+import multiprocessing
+
+multiprocessing.set_start_method("fork")
 
 EXTRACTORS=["unblob", "binwalk"]
 
@@ -194,11 +197,18 @@ def _tar_fs(rootfs_dir, tarbase):
 def _extract(extractor, infile, extract_dir, log_file):
     try:
         if extractor == "unblob":
-            subprocess.run(["unblob",
-                            "--log", log_file,
-                            "--extract-dir", str(extract_dir),
-                            infile], check=True,
-                            capture_output=True, text=True)
+            # Unblob initializes multiprocessing during import so we need to
+            # monkey-patch out re-initializing mp before we can use unblob
+            def set_start_method_nop(method, force=False):
+                pass
+            multiprocessing.set_start_method = set_start_method_nop
+
+            from unblob.processing import ExtractionConfig, process_file
+            from unblob.logging import configure_logger
+
+            configure_logger(0, extract_dir, Path(log_file))
+            config = ExtractionConfig(extract_root=extract_dir, entropy_depth=1)
+            process_file(config, Path(infile))
         elif extractor == "binwalk":
             subprocess.run(["binwalk", "--run-as=root",
                             "--preserve-symlinks",
