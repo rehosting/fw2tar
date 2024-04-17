@@ -210,14 +210,18 @@ def _extract(extractor, infile, extract_dir, log_file):
             config = ExtractionConfig(extract_root=extract_dir, entropy_depth=1)
             process_file(config, Path(infile))
         elif extractor == "binwalk":
-            subprocess.run(["binwalk", "--run-as=root",
-                            "--preserve-symlinks",
-                            "-eM",
-                            "--log", log_file,
-                            "-q", infile,
-                            "-C", str(extract_dir)],
-                            check=True, capture_output=True,
-                            text=True)
+            import binwalk
+
+            modules = binwalk.scan(
+                "--run-as=root",
+                "--preserve-symlinks",
+                "-eM",
+                "--log", log_file,
+                "-q", infile,
+                "-C", str(extract_dir),
+
+                signature=True
+            )
         else:
             raise ValueError(f"Unknown extractor: {extractor}")
 
