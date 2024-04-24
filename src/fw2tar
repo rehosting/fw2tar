@@ -7,6 +7,9 @@ import subprocess
 import sys
 import tempfile
 import time
+import hashlib
+import gzip
+import shutil
 from collections import defaultdict
 from multiprocessing import Process, Lock, Manager
 from pathlib import Path
@@ -145,7 +148,7 @@ def find_all_filesystems(start_dir, other_than=None):
 
 def _tar_fs(rootfs_dir, tarbase):
     # First, define the name of the uncompressed tar archive (temporary name)
-    uncompressed_outfile = tarbase + '.tar'
+    uncompressed_outfile = f"{tarbase}.tar"
     tar_command = [
         "tar",
         "-cf",
@@ -181,15 +184,13 @@ def _tar_fs(rootfs_dir, tarbase):
         print(f"Error archiving root filesystem {rootfs_dir}: {tar_result.stderr}")
         return
 
-    # Now, compress the tar archive using gzip with the --no-name option
+    # Now, compress the tar archive using gzip
     # Output filename will be tarbase.tar.gz
-    gzip_command = ["gzip", "--no-name", "-f", uncompressed_outfile]
+    with open(uncompressed_outfile, 'rb') as f_in, gzip.open(f"{uncompressed_outfile}.gz", 'wb') as f_out:
+        shutil.copyfileobj(f_in, f_out)
 
-    # Execute the gzip command
-    gzip_result = subprocess.run(gzip_command, capture_output=True, text=True)
-    if gzip_result.returncode != 0:
-        print(f"Error compressing tar archive {uncompressed_outfile}: {gzip_result.stderr}")
-        return
+    # Remove tarbase.tar in favor of just keeping the gzipped version
+    os.remove(uncompressed_outfile)
 
     # Chmod the tar.gz file to 644
     os.chmod(f"{uncompressed_outfile}.gz", 0o644)
@@ -197,8 +198,8 @@ def _tar_fs(rootfs_dir, tarbase):
 def _extract(extractor, infile, extract_dir, log_file):
     try:
         if extractor == "unblob":
-            # Unblob initializes multiprocessing during import so we need to
-            # monkey-patch out re-initializing mp before we can use unblob
+            # XXX: Unblob initializes multiprocessing during import so we need to
+            #      monkey-patch out re-initializing mp before we can use unblob
             def set_start_method_nop(method, force=False):
                 pass
             multiprocessing.set_start_method = set_start_method_nop
@@ -229,6 +230,15 @@ def _extract(extractor, infile, extract_dir, log_file):
         print(f"Error running {extractor}: {e.returncode}\nstdout: {e.stdout}\nstderr: {e.stderr}")
         raise e
 
+def sha1sum_file(filename):
+    sha1  = hashlib.sha1() # XXX: if minimum python version >= 3.9, pass usedforsecurity=False
+    buf  = bytearray(128*1024)
+    bufview = memoryview(buf)
+    with open(filename, 'rb', buffering=0) as f:
+        for n in iter(lambda : f.readinto(bufview), 0):
+            sha1.update(bufview[:n])
+    return sha1.hexdigest()
+
 def extract_and_process(extractor, infile, outfile_base, scratch_dir, start_time, verbose, primary_limit,
                         secondary_limit, results, results_lock):
     with tempfile.TemporaryDirectory(dir=scratch_dir) as extract_dir:
@@ -253,7 +263,8 @@ def extract_and_process(extractor, infile, outfile_base, scratch_dir, start_time
                 print(f"Archiving {root} as {tarbase}.tar.gz")
             _tar_fs(root, tarbase)
 
-            archive_hash = subprocess.run(["sha1sum", f"{tarbase}.tar.gz"], capture_output=True, text=True).stdout.split()[0]
+            # XXX: can be replaced by hashlib.file_digest in python >= 3.11
+            archive_hash = sha1sum_file(f"{tarbase}.tar.gz")
             with results_lock:
                 results.append((extractor, idx, size, nfiles, True, archive_hash))
 
