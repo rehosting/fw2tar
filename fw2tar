@@ -109,7 +109,7 @@ fw2tar_run() {
         fi
     fi
 
-    # Check for "--output" flag and create the specified directory if it doesn't exist
+    # Check for "--output" flag, create and map the directory as necessary
     for ((i=0; i<${#cmd[@]}; i++)); do
         if [[ "${cmd[$i]}" == "--output" && $((i+1)) -lt ${#cmd[@]} ]]; then
             output_dir="${cmd[$i+1]}"
@@ -122,6 +122,23 @@ fw2tar_run() {
             local guest_path="/host_$(basename "$abspath")"
             maps+=("$abspath:$guest_path")
             cmd[$i+1]="/host_$(basename "$abspath")/$(basename "$output_dir")"
+
+        fi
+    done
+
+    # Check for "--scratch-dir" flag, create and map the directory as necessary
+    for ((i=0; i<${#cmd[@]}; i++)); do
+        if [[ "${cmd[$i]}" == "--scratch-dir" && $((i+1)) -lt ${#cmd[@]} ]]; then
+            scratch_dir="${cmd[$i+1]}"
+            if [[ ! -d "$scratch_dir" ]]; then
+                mkdir -p "$scratch_dir"
+            fi
+
+            # Add mapping for the scratch directory
+            local abspath=$(realpath "$scratch_dir")
+            local guest_path="/scratch"
+            maps+=("$abspath:$guest_path")
+            cmd[$i+1]="/scratch"
 
         fi
     done
