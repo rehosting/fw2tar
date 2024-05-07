@@ -1,3 +1,5 @@
+#!/usr/bin/env python3
+
 import argparse
 import os
 import stat
@@ -401,14 +403,15 @@ if __name__ == "__main__":
         sys.exit(1)
 
     parser = argparse.ArgumentParser(description="Process some files.")
-    parser.add_argument("infile", type=str, help="Input file")
-    parser.add_argument("outfile", nargs='?', type=str, help="Output file base (optional). Default is infile without extension.")
-    parser.add_argument("scratch_dir", nargs='?', default="/tmp/", type=str, help="Scratch directory (optional). Default /tmp")
+    parser.add_argument("firmware", type=str, help="Input file")
+    parser.add_argument("--scratch-dir", type=str, default="/tmp", help="Scratch directory (optional). Default /tmp")
+    parser.add_argument("--output", dest="outfile", type=str, help="Output file base (optional). Default is firmware without extension.")
     parser.add_argument("--extractors", type=str, help=f"Comma-separated list of extractors. Supported values are {' '.join(EXTRACTORS)}", default="default_extractor")
     parser.add_argument("--verbose", action='store_true', help="Enable verbose output")
     parser.add_argument("--primary_limit", type=int, default=1, help="Maximum number of root-like filesystems to extract. Default 1")
     parser.add_argument("--secondary_limit", type=int, default=0, help="Maximum number of non-root-like filesystems to extract. Default 0")
     parser.add_argument("--force", action='store_true', help="Overwrite existing output file")
+    parser.add_argument("--wrapper-help", action='store_true', help="show help message for the wrapper script")
 
     args = parser.parse_args()
 
@@ -419,7 +422,7 @@ if __name__ == "__main__":
 
     if not args.outfile:
         # Filename without extension by default
-        args.outfile = f"{Path(args.infile).parent}/{Path(args.infile).stem}"
+        args.outfile = f"{Path(args.firmware).parent}/{Path(args.firmware).stem}"
 
     # Does outfile already exist?
     if Path(args.outfile + ".rootfs.tar.gz").exists():
@@ -429,6 +432,6 @@ if __name__ == "__main__":
         else:
             os.remove(args.outfile + ".rootfs.tar.gz")
 
-    main(args.infile, args.outfile, scratch_dir=args.scratch_dir,
+    main(args.firmware, args.outfile, scratch_dir=args.scratch_dir,
          extractors=args.extractors, verbose=args.verbose, 
          primary_limit=args.primary_limit, secondary_limit=args.secondary_limit)

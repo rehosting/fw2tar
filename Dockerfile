@@ -97,4 +97,14 @@ RUN cd /fakeroot && ./bootstrap && ./configure && make && make install -k || tru
 #RUN pip install git+https://github.com/qkaiser/arpy.git
 RUN curl "https://raw.githubusercontent.com/qkaiser/arpy/23faf88a88488c41fc4348ea2b70996803f84f40/arpy.py" -o /usr/local/lib/python3.10/dist-packages/arpy.py
 
-COPY fw2tar.py /
+# Copy wrapper script into container so we can copy out - note we don't put it on guest path
+COPY ./fw2tar /usr/local/src/fw2tar_wrapper
+# And add install helpers which generate shell commands to install it on host
+COPY ./src/resources/banner.sh ./src/resources/fw2tar_install ./src/resources/fw2tar_install.local /usr/local/bin/
+# Warn on interactive shell sessions and provide instructions for install
+RUN echo '[ ! -z "$TERM" ] && [ -z "$NOBANNER" ] && /usr/local/bin/banner.sh' >> /etc/bash.bashrc
+
+# fw2tar here is a simple shell wrapper to call fakeroot fw2tar.py
+COPY src/fw2tar src/fakeroot_fw2tar /usr/local/bin/
+
+CMD ["/usr/local/bin/banner.sh"]

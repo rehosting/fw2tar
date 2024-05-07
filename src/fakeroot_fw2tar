@@ -1,0 +1,3 @@
+#!/bin/bash
+
+fakeroot python3 /usr/local/bin/fw2tar "$@"
