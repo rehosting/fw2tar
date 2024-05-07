@@ -1,0 +1,15 @@
+#!/bin/bash
+
+# Generate commands to write the contents of /usr/local/bin/fw2tar to /usr/local/bin/fw2tar
+# This script is run as ./fw2tar_install | sudo sh
+
+echo "#!/bin/bash"
+
+echo "cat << 'EOF' | sudo tee /usr/local/bin/fw2tar >/dev/null"
+cat /usr/local/src/fw2tar_wrapper
+
+echo
+echo "EOF"
+echo sudo chmod +x /usr/local/bin/fw2tar
+
+echo echo "fw2tar installed successfully to /usr/local/bin/fw2tar"

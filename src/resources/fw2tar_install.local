@@ -1,0 +1,26 @@
+#!/bin/bash
+
+# Generate commands to write the contents of /fw2tar/cmd to ~/.local/bin/fw2tar
+# This script is run as ./fw2tar_install.local | sh
+
+echo "#!/bin/bash"
+echo "mkdir -p \$HOME/.local/bin"
+
+echo "cat << 'EOF' > ~/.local/bin/fw2tar"
+cat /usr/local/src/fw2tar_wrapper
+echo
+echo "EOF"
+
+# Make the script executable and add to path
+echo "chmod +x \$HOME/.local/bin/fw2tar"
+echo "echo 'export PATH="\$HOME/.local/bin:\$PATH"' >> \$HOME/.bashrc"
+
+# Ask user to reload .bashrc to update path
+echo 'BOLD=$(tput bold)'
+echo 'RESET=$(tput sgr0)'
+
+echo "echo \"${BOLD}Success!${RESET} fw2tar installed to ~/.local/bin/fw2tar. Update your PATH to use it by running:\""
+echo "echo \"  $ \${BOLD}source ~/.bashrc\${RESET}\""
+echo "echo"
+echo "echo \"Then run fw2tar, for example:\""
+echo "echo \"  $ \${BOLD}fw2tar --help\""
