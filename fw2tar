@@ -1,0 +1,176 @@
+#!/bin/bash
+set -eu
+
+BOLD=""
+RESET=""
+RED=""
+GREEN=""
+if [ -t 0 ]; then
+    # Can only use colors if we're in a terminal
+    BOLD=$(tput bold)
+    RESET=$(tput sgr0)
+    RED=$(tput setaf 1)
+    GREEN=$(tput setaf 2)
+fi
+
+
+image="rehosting/fw2tar"
+
+fw2tar_run() {
+    local cmd=()
+    local maps=()
+    local build=false
+    local verbose=false
+    local image="rehosting/fw2tar" # Name of container instance
+
+    # Process each command-line argument
+    while [[ $# -gt 0 ]]; do
+        case "$1" in
+            --wrapper-help)
+                echo "Usage: fw2tar [WRAPPER FLAGS] [FLAGS] FIRMWARE_FILE"
+                echo "Wrapper script for running FW2TAR in a Docker container"
+                echo ""
+                echo "Wrapper-specific flags may be passed in *before* the fw2tar flags and args. If a value is required, it must be specified immediately after the flag with a space."
+                echo "  --build: Build the fw2tar container before running the specified command. If no other arguments are provided, the container will be built and the script will exit."
+                echo "  --image: Which image to run. Default: $image"
+                echo "  --verbose: Print verbose output for fw2tar wrapper (e.g., filesystem mappings, docker command)"
+                echo "  --wrapper-help: this message"
+                echo ""
+                echo "All other arguments will be passed through to the main fw2tar command in the container."
+                echo "For example try:"
+                echo "  fw2tar --help"
+                echo "  fw2tar ./your_firmware.bin"
+                exit 0
+                ;;
+            --build)
+                build=true
+                shift
+                ;;
+            --image)
+                image="$2"
+                shift 2
+                ;;
+            --verbose)
+                verbose=true
+                shift
+                ;;
+            *)  # Default case: If no more known options, keep as part of command
+                cmd=("$@")
+                break
+                ;;
+        esac
+    done
+
+    # If command is empty, parse any un-shifted args into array - probably means we were run with wrapper flags only (i.e., --build)
+    if [[ ${#cmd[@]} -eq 0 ]]; then
+        cmd=("$@")
+    fi
+
+    # If verbose, log all wrapper args and command
+    if $verbose; then
+        echo "${BOLD}Wrapper args:${RESET}"
+        echo "  build: $build"
+        echo "  image: $image"
+        echo "  verbose: $verbose"
+        echo "  fw2tar cmd: ${cmd[*]}"
+        echo
+    fi
+
+    if $build; then
+        echo "Running with container build (--build). Entire container will be rebuilt and tagged as $image."
+        # Make sure we have Dockerfile and directory is namedfw2tar 
+        if [ ! -f "Dockerfile" ]; then
+            echo "Dockerfile not found in current directory and you requested a container rebuild"
+            exit 1
+        fi
+        # Check if current directory is named fw2tar
+        if [ ! "$(basename "$(pwd)")" == "fw2tar" ]; then
+            echo "Current directory is not named fw2tar but you requested a container rebuild"
+            exit 1
+        fi
+        DOCKER_BUILDKIT=1 docker build -t $image .
+
+        # If we have no other args, exit 0
+        if [[ ${#cmd[@]} -eq 0 ]]; then
+            echo "$image built. Exiting as no command was specified."
+            exit 0
+        fi
+    fi
+
+    # Check if last argument is a file, if so we'll need to map it
+    if [[ ${#cmd[@]} -gt 0 ]]; then
+        if [[ -f "${cmd[-1]}" ]]; then
+            local arg="${cmd[-1]}"
+            local abspath=$(realpath "$arg")
+            local host_path=$(dirname "$abspath")
+            local guest_path="/host_$(basename "$host_path")"
+            maps+=("$host_path:$guest_path")
+            cmd[-1]="/host_$(basename "$host_path")/$(basename "$arg")"
+        fi
+    fi
+
+    # Check for "--output" flag and create the specified directory if it doesn't exist
+    for ((i=0; i<${#cmd[@]}; i++)); do
+        if [[ "${cmd[$i]}" == "--output" && $((i+1)) -lt ${#cmd[@]} ]]; then
+            output_dir="${cmd[$i+1]}"
+            if [[ ! -d "$output_dir" ]]; then
+                mkdir -p "$output_dir"
+            fi
+
+            # Add mapping for the output directory
+            local abspath=$(realpath "$output_dir")
+            local guest_path="/host_$(basename "$abspath")"
+            maps+=("$abspath:$guest_path")
+            cmd[$i+1]="/host_$(basename "$abspath")/$(basename "$output_dir")"
+
+        fi
+    done
+
+    # Sort mappings by path length
+    IFS=$'\n' maps=($(sort -r <<<"${maps[*]}"))
+    unset IFS
+
+    if $verbose; then
+        echo "${BOLD}Mappings from host paths to guest paths: $RESET"
+        for map in "${maps[@]}"; do
+            echo "  $map"
+        done
+        echo
+    fi
+
+    # Build Docker command
+    docker_cmd=("docker" "run" "--rm")
+    docker_cmd+=("-u" "$(id -u):$(id -g)") # XXX will fakeroot be okay?
+
+    # Add mappings to docker command
+    for map in "${maps[@]}"; do
+        docker_cmd+=("-v" "$map")
+    done
+
+
+    docker_cmd+=("$image")
+    docker_cmd+=("fakeroot_fw2tar")
+    docker_cmd+=("${cmd[@]}")
+
+    if $verbose; then
+        echo "${BOLD}Fw2tar command:${RESET}"
+        echo "  fw2tar ${cmd[@]}"
+        echo
+
+        echo "${BOLD}Complete docker commands:${RESET}"
+        echo "  ${docker_cmd[*]}"
+        echo
+
+        echo "${BOLD}Command output:${RESET}"
+    fi
+
+    # Run the Docker command
+    "${docker_cmd[@]}"
+
+}
+
+# Main function
+main() {
+    fw2tar_run "$@"
+}
+main "$@"
