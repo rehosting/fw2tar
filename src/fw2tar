@@ -256,8 +256,9 @@ def extract_and_process(extractor, infile, outfile_base, scratch_dir, start_time
                 tarbase = f"{outfile_base}.{extractor}.nonroot.{idx}"
                 _tar_fs(root, tarbase)
 
+                archive_hash = subprocess.run(["sha1sum", f"{tarbase}.tar.gz"], capture_output=True, text=True).stdout.split()[0]
                 with results_lock:
-                    results.append((extractor, idx, size, nfiles, False))
+                    results.append((extractor, idx, size, nfiles, False, archive_hash))
 
 def monitor_processes(processes, results, max_wait=600, follow_up_wait=120):
     '''
