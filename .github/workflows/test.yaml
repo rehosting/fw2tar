@@ -1,21 +1,12 @@
-name: Build and Release Container
+name: Build and Test Container
 
-on:
-  push:
-    branches:
-      - main
+on: [push, pull_request]
 
 jobs:
   build-and-release:
     runs-on: ubuntu-latest
 
     steps:
-      - name: Log in to Docker Hub
-        uses: docker/login-action@v3
-        with:
-          username: rehosting
-          password: ${{secrets.DOCKERHUB_TOKEN}}
-
       - name: Pull latest Docker image for cache
         run: docker pull rehosting/fw2tar:latest || true
 
@@ -27,9 +18,12 @@ jobs:
         uses: docker/build-push-action@v5
         with:
           context: .
-          push: true
+          push: false
           tags: |
             rehosting/fw2tar:${{ github.sha }}
             rehosting/fw2tar:latest
           cache-from: type=registry,ref=rehosting/fw2tar:latest
           cache-to: type=inline
+
+      - name: Run Tests
+        run: ./tests/end_to_end.sh
