@@ -33,3 +33,6 @@ jobs:
             rehosting/fw2tar:latest
           cache-from: type=registry,ref=rehosting/fw2tar:latest
           cache-to: type=inline
+
+      - name: Run Tests
+        run: ./tests/end_to_end.sh
