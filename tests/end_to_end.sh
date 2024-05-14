@@ -32,6 +32,8 @@ test() {
         exit 1
     fi
 
+    ls -lah $(realpath "$ROOTFS")
+
     tar -tvf "$ROOTFS" | awk '{ print $6 " " $2 " " $1 " " $3 " " $4  }' | column -t | sort > $NEW_FIRMWARE_LISTING
 
     if [[ "$NEW_FIRMWARE_LISTING" == "$OLD_FIRMWARE_LISTING" ]]; then
@@ -39,6 +41,7 @@ test() {
     else
         if ! diff --color=always "$OLD_FIRMWARE_LISTING" "$NEW_FIRMWARE_LISTING"; then
             echo -e "${RED}Listings for ${FIRMWARE_NAME} do not match.${END} To approve changes replace ${OLD_FIRMWARE_LISTING} with ${NEW_FIRMWARE_LISTING}"
+            exit 1
         else
             echo -e "${GREEN}Firmware listing matches for ${FIRMWARE_NAME}.${END}"
         fi
