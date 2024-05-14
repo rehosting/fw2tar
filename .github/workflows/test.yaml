@@ -3,7 +3,7 @@ name: Build and Test Container
 on: [push, pull_request]
 
 jobs:
-  build-and-release:
+  build-and-test:
     runs-on: ubuntu-latest
 
     steps:
