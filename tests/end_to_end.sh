@@ -48,10 +48,7 @@ echo "$SCRIPT_DIR"
 curl "https://static.tp-link.com/upload/firmware/2023/202308/20230818/Archer%20AX1800(US)_V4.6_230725.zip" \
     -o /tmp/ax1800_firmware.zip
 
-# Extract AX1800 zip to get the firmware binary blob
-unzip -o /tmp/ax1800_firmware.zip -d /tmp/ax1800_firmware
-
-FIRMWARE_PATH="/tmp/ax1800_firmware/AX23_us_ca_tw_sg-up-ver1-1-0-P1[20230725-rel55602]_2023-07-25_15.39.38.bin"
+FIRMWARE_PATH="/tmp/ax1800_firmware.zip"
 FIRMWARE_LISTING="$SCRIPT_DIR/results/ax1800_listing.txt"
 
 test $FIRMWARE_PATH $FIRMWARE_LISTING "AX1800"
