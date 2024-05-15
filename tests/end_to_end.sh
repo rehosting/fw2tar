@@ -32,7 +32,7 @@ test() {
         exit 1
     fi
 
-    tar --utc -tvf "$ROOTFS" | awk '{ print $6 " " $2 " " $1 " " $3 " " $4  }' | column -t | sort > $NEW_FIRMWARE_LISTING
+    tar --utc -tvf "$ROOTFS" | awk '{ print $6 " " $2 " " $1 " " $3 " " $4  }' | column -t | LC_ALL=C LANG=C sort > $NEW_FIRMWARE_LISTING
 
     if [[ "$NEW_FIRMWARE_LISTING" == "$OLD_FIRMWARE_LISTING" ]]; then
         echo -e "Generated new firmware listing for ${FIRMWARE_NAME}. ${YELLOW}Nothing to diff, skipping.${END}"
