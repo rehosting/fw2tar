@@ -19,7 +19,7 @@ test() {
     fi
 
     FIRMWARE_PATH_OUT="${FIRMWARE_PATH}_out"
-    ROOTFS="$FIRMWARE_PATH_OUT.rootfs.tar.gz"
+    ROOTFS="$FIRMWARE_PATH_OUT/$(basename $FIRMWARE_PATH_OUT).rootfs.tar.gz"
 
     rm -f "$ROOTFS"
 
