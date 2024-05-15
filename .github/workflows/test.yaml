@@ -1,6 +1,6 @@
 name: Build and Test Container
 
-on: [push, pull_request]
+on: push
 
 jobs:
   build-and-test:
@@ -27,3 +27,10 @@ jobs:
 
       - name: Run Tests
         run: ./tests/end_to_end.sh
+
+      - name: Upload AX1800 Results
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: ax1800_listing.txt
+          path: /home/runner/work/fw2tar/fw2tar/tests/results/ax1800_listing.txt.new
