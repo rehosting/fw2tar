@@ -44,7 +44,7 @@ export INPUT_FILE=/path/to/your/firmware.bin
 docker run --rm -it \
     -v $(dirname $INPUT_FILE):/host \
     rehosting/fw2tar:latest \
-    fakeroot python3 /fw2tar.py /host/$(basename $INPUT_FILE)
+    fakeroot_fw2tar /host/$(basename $INPUT_FILE)
 ```
 
 The resulting filesystem(s) will be output to `/path/to/your/firmware.{binwalk,unblob}.*.tar.gz`, with each root filesystem extracted to its own archive.
@@ -55,14 +55,14 @@ Ensure you have Git and Docker installed, then:
 #### Clone and build the container
 ```sh
 git clone https://github.com/rehosting/fw2tar.git
-docker build -t rehosting/fw2tar:latest fw2tar
+DOCKER_BUILDKIT=1 docker build -t rehosting/fw2tar:latest fw2tar
 ```
 
 #### Extract Firmware
 Replace `/path/to/your/firmware.bin` with the actual path to your firmware file:
 
 ```sh
-./fw2tar/fw2tar.sh /path/to/your/firmware.bin
+./fw2tar/fw2tar /path/to/your/firmware.bin
 ```
 
 The resulting filesystem(s) will be output to `/path/to/your/firmware.{binwalk,unblob}.*.tar.gz`, with each root filesystem extracted to its own archive.
@@ -90,7 +90,7 @@ export INPUT_FILE=/path/to/your/firmware.bin
 singularity exec \
     -B $(dirname $INPUT_FILE):/host \
     fw2tar.sif \
-    fakeroot python3 /fw2tar.py /host/$(basename $INPUT_FILE)
+    fakeroot_fw2tar /host/$(basename $INPUT_FILE)
 ```
 
 Your filesystem(s) will be output to `/path/to/your/firmware.{binwalk,unblob}.tar.gz`.
