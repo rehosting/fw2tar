@@ -27,7 +27,17 @@ where altering file ownership or permissions could undermine the integrity of an
 
 ## Usage
 
-### Pre-built docker container
+Once installed, repackaging a firmware is as simple as:
+
+```
+fw2tar /path/to/your/firmware.bin
+```
+
+Which will generate `/path/to/your/firmware.rootfs.tar.gz` containing the rootfs of the firmware.
+
+There are two types of arguments, wrapper arguments (which handle anything outside of the fw2tar docker container, such as rebuilding the container or specifying a docker image tag) and fw2tar flags (which get passed to the actual application). These can be found with `--wrapper-help` and `--help` respectively.
+
+### Installing Pre-built
 
 #### Download the container
 Ensure Docker is installed on your system, then download the container from GitHub:
@@ -36,33 +46,36 @@ Ensure Docker is installed on your system, then download the container from GitH
 docker pull rehosting/fw2tar:latest
 ```
 
-#### Extract Firmware
-Replace `/path/to/your/firmware.bin` with the actual path to your firmware file:
+### Install the Wrapper
 
-```sh
-export INPUT_FILE=/path/to/your/firmware.bin
-docker run --rm -it \
-    -v $(dirname $INPUT_FILE):/host \
-    rehosting/fw2tar:latest \
-    fakeroot_fw2tar /host/$(basename $INPUT_FILE)
+Run the following command:
+
+```
+docker run rehosting/fw2tar
 ```
 
-The resulting filesystem(s) will be output to `/path/to/your/firmware.{binwalk,unblob}.*.tar.gz`, with each root filesystem extracted to its own archive.
+it will give you a command for installing system-wide or for your individual user. Run the command for your preferred install type, then follow any additional instructions from that command.
 
 ### Docker from source
+
 Ensure you have Git and Docker installed, then:
 
 #### Clone and build the container
+
 ```sh
 git clone https://github.com/rehosting/fw2tar.git
-DOCKER_BUILDKIT=1 docker build -t rehosting/fw2tar:latest fw2tar
+cd fw2tar
+./fw2tar --build
 ```
 
+If you wish to install globally, see "Install the Wrapper" above.
+
 #### Extract Firmware
+
 Replace `/path/to/your/firmware.bin` with the actual path to your firmware file:
 
 ```sh
-./fw2tar/fw2tar /path/to/your/firmware.bin
+./fw2tar /path/to/your/firmware.bin
 ```
 
 The resulting filesystem(s) will be output to `/path/to/your/firmware.{binwalk,unblob}.*.tar.gz`, with each root filesystem extracted to its own archive.
