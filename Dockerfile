@@ -5,6 +5,7 @@ ENV DEBIAN_FRONTEND=noninteractive
 ENV TZ=America/New_York
 ENV LC_ALL=C.UTF-8
 ENV LANG=C.UTF-8
+ENV HOME=/root
 
 RUN apt-get update && \
   apt-get install -q -y \
@@ -84,6 +85,10 @@ RUN cd /unblob && poetry install --no-dev
 
 # Explicitly install unblob deps - mostly captured above, but some of the .debs get updated and installed via curl
 RUN sh -c /unblob/unblob/install-deps.sh
+
+# We will run as other users (matching uid/gid to host), but binwalk has config files in /root/.config
+# that need to be created and read at runtime.
+RUN chmod -R 777 /root/
 
 # Install our custom fakeroot
 # Get fakeroot dependencies
