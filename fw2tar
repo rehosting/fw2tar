@@ -20,6 +20,7 @@ fw2tar_run() {
     local cmd=()
     local maps=()
     local build=false
+    local singularity=false
     local verbose=false
     local image="rehosting/fw2tar" # Name of container instance
 
@@ -32,6 +33,7 @@ fw2tar_run() {
                 echo ""
                 echo "Wrapper-specific flags may be passed in *before* the fw2tar flags and args. If a value is required, it must be specified immediately after the flag with a space."
                 echo "  --build: Build the fw2tar container before running the specified command. If no other arguments are provided, the container will be built and the script will exit."
+                echo "  --build-singularity: Build the fw2tar container as a sif."
                 echo "  --image: Which image to run. Default: $image"
                 echo "  --verbose: Print verbose output for fw2tar wrapper (e.g., filesystem mappings, docker command)"
                 echo "  --wrapper-help: this message"
@@ -44,6 +46,11 @@ fw2tar_run() {
                 ;;
             --build)
                 build=true
+                shift
+                ;;
+            --build-singularity)
+                build=true
+                singularity=true
                 shift
                 ;;
             --image)
@@ -89,6 +96,18 @@ fw2tar_run() {
             exit 1
         fi
         DOCKER_BUILDKIT=1 docker build -t $image .
+
+        # --build-singularity
+        if $singularity; then
+            docker run -v /var/run/docker.sock:/var/run/docker.sock \
+                -v $(pwd):/output \
+                --privileged -t \
+                --rm quay.io/singularity/docker2singularity:v3.9.0 rehosting/fw2tar
+            mv rehosting_fw2tar*.sif fw2tar.sif
+
+            echo "$image built. Exiting."
+            exit 0
+        fi
 
         # If we have no other args, exit 0
         if [[ ${#cmd[@]} -eq 0 ]]; then
