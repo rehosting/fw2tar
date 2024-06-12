@@ -1,23 +1,230 @@
 #!/usr/bin/env python3
 
 import argparse
+import gzip
+import hashlib
+import multiprocessing
 import os
+import shutil
 import stat
 import subprocess
 import sys
 import tempfile
 import time
-import hashlib
-import gzip
-import shutil
-from collections import defaultdict
+from abc import ABC, abstractmethod
+from collections import defaultdict, deque
 from multiprocessing import Process, Lock, Manager
 from pathlib import Path
-import multiprocessing
+from typing import List, Dict
+
+# Binwalk dependencies
+import binwalk
+
+# Unblob dependencies
+# XXX: Unblob initializes multiprocessing during import so we need to
+#      monkey-patch out re-initializing mp before we can use unblob
+multiprocessing.set_start_method = lambda method, **kwargs: 0
+from unblob.processing import ExtractionConfig, process_file as unblob_process_file
+from unblob.logging import configure_logger as unblob_configure_logger
+from unblob import report as unblob_report
 
 multiprocessing.set_start_method("fork")
 
-EXTRACTORS=["unblob", "binwalk"]
+def sha1sum_file(filename):
+    sha1  = hashlib.sha1() # XXX: if minimum python version >= 3.9, pass usedforsecurity=False
+    buf  = bytearray(128*1024)
+    bufview = memoryview(buf)
+    with open(filename, 'rb', buffering=0) as f:
+        for n in iter(lambda : f.readinto(bufview), 0):
+            sha1.update(bufview[:n])
+    return sha1.hexdigest()
+
+
+class Extractor(ABC):
+    def __init__(self, name: str):
+        self.name = name
+
+    def __repr__(self) -> str:
+        return self.name
+
+    @abstractmethod
+    def extract(self, filesystem: Path, outdir: Path, verbose: bool = False) -> Dict[str, List[str]]:
+        """
+        Given a filesystem, extract it to outdir. Return a dict of extract_type
+        (e.g., carved, ext2, etc) to list of filenames created in outdir
+        """
+        pass
+
+
+class UnblobExtractor(Extractor):
+    def __init__(self):
+        super().__init__("unblob")
+
+    def extract(self, filesystem: Path, outdir: Path, verbose: bool = False) -> Dict[str, List[str]]:
+        log_file = os.path.join(outdir, "unblob.log")
+        unblob_configure_logger(0, outdir, Path(log_file))
+        results = unblob_process_file(
+                                        ExtractionConfig(extract_root=outdir,
+                                                        entropy_depth=0,
+                                                        max_depth=3,
+                                                        verbose=False,
+                                                        keep_extracted_chunks=True),
+                                        filesystem)
+        return self._parse_unblob_results(filesystem, outdir, results, verbose)
+
+    def _parse_unblob_results(self, filesystem, outdir, process_result, verbose) -> Dict[str, List[str]]:
+        results = [] # (carved/extracted, path, hash, derived_from_hash)
+        path_to_hash = {}
+        path_to_hash[str(filesystem)] = sha1sum_file(filesystem)
+
+        for task_result in process_result.results:
+            source_file = task_result.task.path
+            source_id = task_result.task.blob_id
+            
+            if verbose:
+                print(f"ID {source_id} is file {source_file}")
+
+            for report in task_result.reports:
+                if isinstance(report, (unblob_report.ChunkReport, unblob_report.UnknownChunkReport)):
+                    print(f"New carved chunk with ID={report.id}. Carved from {source_file} (derived from ID={source_id})")
+                    #is_unknown = isinstance(report, unblob_report.UnknownChunkReport)
+                    #carved_name = f"{report.start_offset}-{report.end_offset}.{report.handler_name if not is_unknown else 'unknown'}"
+                    #carved_dir = outdir
+                    #carved_path = carved_dir / Path(str(task_result.task.path.name) + "_extract") / carved_name
+                    #if not carved_path.exists():
+                    #    # Perhaps we didn't actually carve? I.e., a zip file input just goes straight to StatReports, the ChunkReport is bogus
+                    #    if verbose:
+                    #        print(f"Warning: {carved_path} does not exist")
+                    #    continue
+
+                    #path_to_hash[str(carved_path)] = sha1sum_file(carved_path)
+                    #results.append(("carved", carved_path, path_to_hash[str(carved_path)], path_to_hash[str(filesystem)]))
+                    #print(f"Carved {carved_path}")
+
+                elif isinstance(report, unblob_report.StatReport):
+                    print("Stat:", report)
+                    # Convert from _extract to source path
+                    #source_path = task_result.task.path.parent / (task_result.task.path.name.replace("_extract", ""))
+                    # replace the final _extract with '' in the path
+                    #source_path = Path(str(task_result.task.path)[::-1].replace("_extract"[::-1], "", 1)[::-1])
+                    #source_path = task_result.task.path
+
+                    #if not source_path.exists():
+                    #    # Is this the original input file? Check basename
+                    #    if source_path.name == filesystem.name:
+                    #        source_path = filesystem
+
+                    #if source_path.exists():
+                    #    if source_path.is_dir():
+                    #        print(f"TODO: source is dir", source_path)
+                    #    else:
+                    #        if source_path not in path_to_hash:
+                    #            path_to_hash[str(source_path)] = sha1sum_file(source_path)
+                    #        derived_from = path_to_hash[str(source_path)]
+                    #        if verbose:
+                    #            print(f"Extracted from {source_path} ({derived_from})")
+                    #else:
+                    #    if verbose:
+                    #        print(f"Unknown source: {source_path} missing")
+                    #    derived_from = None
+                    #
+                    #if report.is_file:
+                    #    if report.path not in path_to_hash:
+                    #        path_to_hash[str(report.path)] = sha1sum_file(report.path)
+                    #    results.append(("extracted", report.path, path_to_hash[str(report.path)], derived_from))
+
+                    #elif report.is_dir:
+                    #    for entry in report.path.rglob("*"):
+                    #        if entry.is_file():
+                    #            hsh = sha1sum_file(entry)
+                    #            results.append(("extracted", entry, hsh, derived_from))
+                #else:
+                #    print(f"Unknown report type: {report}")
+
+        return results
+
+class BinwalkExtractor(Extractor):
+    def __init__(self):
+        super().__init__("binwalk")
+
+    def extract(self, filesystem: Path, outdir: Path, verbose: bool = False) -> Dict[str, List[str]]:
+        results = []
+        derived_from_hash = sha1sum_file(filesystem)
+        for module in binwalk.scan("--run-as=root", "--preserve-symlinks", str(filesystem), "-C", str(outdir), signature=True, quiet=True, extract=True):
+            for result in module.results:
+                if result.file.path in module.extractor.output:
+                    if result.offset in module.extractor.output[result.file.path].carved:
+                        if verbose:
+                            print("Carved data from offset 0x%X to %s" % (result.offset, module.extractor.output[result.file.path].carved[result.offset]))
+                        pth = module.extractor.output[result.file.path].carved[result.offset]
+                        hsh = sha1sum_file(pth)
+                        results.append(("carved", pth, hsh, derived_from_hash))
+
+                    if result.offset in module.extractor.output[result.file.path].extracted:
+                        if verbose:
+                            print("Extracted %d files from offset 0x%X to '%s' using '%s'" % (len(module.extractor.output[result.file.path].extracted[result.offset].files),
+                                                                    result.offset,
+                                                                    module.extractor.output[result.file.path].extracted[result.offset].files[0],
+                                                                    module.extractor.output[result.file.path].extracted[result.offset].command))
+                        for pth in module.extractor.output[result.file.path].extracted[result.offset].files:
+                            hsh = sha1sum_file(pth)
+                            results.append(("carved", pth, hsh, derived_from_hash))
+        return results
+
+
+class ExtractionManager:
+    def __init__(self):
+        self.extractors: Dict[str, Extractor] = {
+            'unblob': UnblobExtractor(),
+            #'binwalk': BinwalkExtractor()
+        }
+
+    def extract(self, filesystem: str, outdir: str, verbose: bool = False) -> List[str]:
+        processed = set() # (extractor_name, input_hash)
+        mapping = dict()
+        self._queue_extract(filesystem, outdir, verbose, processed, mapping)
+        # Examine all results, use processed and mapping to report?
+        for (extractor_name, generated_hash) in processed:
+            print(f"{extractor_name} processed {generated_hash} -> {mapping[generated_hash]}")
+
+    def _queue_extract(self, target, outdir, verbose, processed, mapping):
+        queue = deque([(target, None)])
+
+        idx = 0
+        with tempfile.TemporaryDirectory(dir=args.scratch_dir) as tmpdir_base:
+            while queue:
+                idx += 1
+                tmpdir = tmpdir_base + str(idx)
+                os.makedirs(tmpdir, exist_ok=True)
+                current_target, derived_from = queue.popleft()
+                for extractor_name, extractor_obj in self.extractors.items():
+                        hsh = sha1sum_file(current_target)
+                        if (extractor_name, hsh) in processed:
+                            continue
+                        processed.add((extractor_name, hsh))
+                        mapping[hsh] = current_target
+
+                        results = extractor_obj.extract(Path(current_target), Path(tmpdir), verbose=verbose)
+                        if len(results) > 100:
+                            # Probably a full FS - skip?
+                            # TODO: can we be smarter and deffer to the extractors to decide if they recurse or not?
+                            continue
+
+                        for (typ, pth, new_hsh, derived_from) in results:
+                            if (extractor_name, new_hsh) not in processed:
+                                queue.append((pth, current_target))
+
+    def _recurse_extract(self, target, outdir, verbose, processed, map):
+        for extractor_name, extractor_obj in self.extractors.items():
+            with tempfile.TemporaryDirectory(dir=args.scratch_dir) as tmpdir:
+                hsh = sha1sum_file(target)
+                processed.add((extractor_name, hsh))
+                map[hsh] = target
+                for (typ, pth, hsh, derived_from) in extractor_obj.extract(Path(target), Path(tmpdir), verbose=verbose):
+                    if (extractor_name, hsh) in processed:
+                        # Got an output that we've already processed - skip
+                        continue
+                    self._extract(pth, outdir, verbose, processed, map)
 
 BAD_SUFFIXES = ['_extract', '.uncompressed', '.unknown', # Filename suffixes that show up as extraction artifacts
                 'cpio-root', 'squashfs-root', '0.tar'] # squashfs-root-* is special cased below
@@ -198,15 +405,9 @@ def _tar_fs(rootfs_dir, tarbase):
 def _extract(extractor, infile, extract_dir, log_file):
     try:
         if extractor == "unblob":
-            # XXX: Unblob initializes multiprocessing during import so we need to
-            #      monkey-patch out re-initializing mp before we can use unblob
-            def set_start_method_nop(method, force=False):
-                pass
-            multiprocessing.set_start_method = set_start_method_nop
 
             from unblob.processing import ExtractionConfig, process_file
             from unblob.logging import configure_logger
-
             configure_logger(0, extract_dir, Path(log_file))
             config = ExtractionConfig(extract_root=extract_dir, entropy_depth=1)
             process_file(config, Path(infile))
@@ -229,15 +430,6 @@ def _extract(extractor, infile, extract_dir, log_file):
     except subprocess.CalledProcessError as e:
         print(f"Error running {extractor}: {e.returncode}\nstdout: {e.stdout}\nstderr: {e.stderr}")
         raise e
-
-def sha1sum_file(filename):
-    sha1  = hashlib.sha1() # XXX: if minimum python version >= 3.9, pass usedforsecurity=False
-    buf  = bytearray(128*1024)
-    bufview = memoryview(buf)
-    with open(filename, 'rb', buffering=0) as f:
-        for n in iter(lambda : f.readinto(bufview), 0):
-            sha1.update(bufview[:n])
-    return sha1.hexdigest()
 
 def extract_and_process(extractor, infile, outfile_base, scratch_dir, start_time, verbose, primary_limit,
                         secondary_limit, results, results_lock):
@@ -304,6 +496,43 @@ def monitor_processes(processes, results, max_wait=600, follow_up_wait=120):
             break
         time.sleep(5)
 
+
+
+def joint_extraction(infile, outfile_base, scratch_dir, extractors, verbose):
+    '''
+    We'll manually drive each of the extractors we have to extract files.
+    At a high level we want to do the following:
+    remaining = [infile]
+    extracted = set()
+    processed_by = {
+        extractor: set()
+    } for extractor in extractors
+
+    while len(remaining):
+        target = remaining.pop()
+        for extractor in extractor:
+            if target in processed_by[extractor]:
+                continue
+            new_files = extractor.extract(rem)
+            remaining.extend(new_files)
+    '''
+
+    remaining = [infile]
+    extracted = set()
+    processed_by = {extractor: set() for extractor in extractors}
+
+    while len(remaining):
+        target = remaining.pop()
+        extracted.add(target)
+        for extractor in extractors:
+            if target in processed_by[extractor]:
+                continue
+            results = extractor.extract(target, scratch_dir)
+            for r in results:
+                if r not in extracted: # avoid loops
+                    remaining.extend(results)
+
+
 def main(infile, outfile_base, scratch_dir="/tmp", extractors=None, verbose=False, primary_limit=1, secondary_limit=0, log_extractor_used=False):
     # Launching both extraction processes in parallel
     processes = []
@@ -312,6 +541,9 @@ def main(infile, outfile_base, scratch_dir="/tmp", extractors=None, verbose=Fals
     results_lock = Lock()
     start_time = time.time()
 
+    joint_extraction(infile, outfile_base, scratch_dir, extractors, verbose)
+
+    '''
     for extractor in extractors:
         if verbose:
             print(f"Starting {extractor} extraction...")
@@ -325,6 +557,7 @@ def main(infile, outfile_base, scratch_dir="/tmp", extractors=None, verbose=Fals
 
     # Wait for both processes to complete
     monitor_processes(processes, results)
+    '''
 
     # Note we no longer need results_lock because we're back to a single process
 
@@ -428,11 +661,13 @@ if __name__ == "__main__":
         print("This script must be run as (fake)root")
         sys.exit(1)
 
+    em = ExtractionManager()
+
     parser = argparse.ArgumentParser(description="Process some files.")
     parser.add_argument("firmware", type=str, help="Input file")
     parser.add_argument("--scratch-dir", type=str, default="/tmp", help="Scratch directory (optional). Default /tmp")
     parser.add_argument("--output", dest="outfile", type=str, help="Output file base (optional). Default is firmware without extension.")
-    parser.add_argument("--extractors", type=str, help=f"Comma-separated list of extractors. Supported values are {' '.join(EXTRACTORS)}", default="default_extractor")
+    parser.add_argument("--extractors", type=str, help=f"Comma-separated list of extractors. Supported values are {' '.join(em.extractors.keys())}", default="default_extractor")
     parser.add_argument("--loud", action='store_true', help="Enable loud (verbose) output")
     parser.add_argument("--report_extractor", action='store_true', help="Create a file next to the output file reporting the extractor used")
     parser.add_argument("--primary_limit", type=int, default=1, help="Maximum number of root-like filesystems to extract. Default 1")
@@ -443,7 +678,7 @@ if __name__ == "__main__":
     args = parser.parse_args()
 
     if args.extractors == "default_extractor":
-        args.extractors = EXTRACTORS
+        args.extractors = em.extractors.keys()
     else:
         args.extractors = args.extractors.split(',')
 
@@ -459,7 +694,20 @@ if __name__ == "__main__":
         else:
             os.remove(args.outfile + ".rootfs.tar.gz")
 
-    main(args.firmware, args.outfile, scratch_dir=args.scratch_dir,
-         extractors=args.extractors, verbose=args.loud,
-         primary_limit=args.primary_limit, secondary_limit=args.secondary_limit,
-        log_extractor_used=args.report_extractor)
+    ub  = UnblobExtractor()
+    ub.extract(Path(args.firmware), Path(args.scratch_dir), verbose=True)
+
+    #em = ExtractionManager()
+    # Create tmpdir in args.scratch_dir
+    #em.extract(Path(args.firmware), Path(args.scratch_dir), verbose=True)
+
+    #extracted_files = ext1["extracted"] + ext1["carved"]
+    #for extracted in extracted_files:
+    #    print("Recursing into", extracted)
+    #    ext2 = em.extract("unblob", Path(extracted), Path(args.scratch_dir), verbose=True)
+    #    print(ext2)
+
+    #main(args.firmware, args.outfile, scratch_dir=args.scratch_dir,
+    #     extractors=args.extractors, verbose=args.loud,
+    #     primary_limit=args.primary_limit, secondary_limit=args.secondary_limit,
+    #    log_extractor_used=args.report_extractor)
