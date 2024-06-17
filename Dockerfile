@@ -20,6 +20,7 @@ RUN apt-get update && \
     curl \
     default-jdk \
     e2fsprogs \
+    fakeroot \
     gcc \
     git \
     gzip \
@@ -93,10 +94,10 @@ RUN chmod -R 777 /root/
 # Install our custom fakeroot
 # Get fakeroot dependencies
 # Use sed to rewrite our soruces.list so we can get build-deps
-RUN sed -i 's/^# deb-src/deb-src/' /etc/apt/sources.list
-RUN apt-get update && apt-get build-dep -y fakeroot
-RUN git clone https://github.com/rehosting/fakeroot.git /fakeroot
-RUN cd /fakeroot && ./bootstrap && ./configure && make && make install -k || true
+#RUN sed -i 's/^# deb-src/deb-src/' /etc/apt/sources.list
+#RUN apt-get update && apt-get build-dep -y fakeroot
+#RUN git clone https://github.com/rehosting/fakeroot.git /fakeroot
+#RUN cd /fakeroot && ./bootstrap && ./configure && make && make install -k || true
 
 # Patch to fix unblob #767 that hasn't yet been upstreamed. Pip install didn't work. I don't understand poetry
 #RUN pip install git+https://github.com/qkaiser/arpy.git
