@@ -59,15 +59,6 @@ FIRMWARE_LISTING="$SCRIPT_DIR/results/ax1800_listing.txt"
 
 test $FIRMWARE_PATH $FIRMWARE_LISTING "AX1800" "binwalk,unblob"
 
-# Download NETGEAR AX5400 (RAX54S) firmware
-FIRMWARE_PATH="/tmp/rax54s_firmware.zip"
-
-curl "https://www.downloads.netgear.com/files/GDC/RAX54S/RAX54Sv2-V1.1.4.28.zip" \
-    -o "$FIRMWARE_PATH"
-
-FIRMWARE_LISTING="$SCRIPT_DIR/results/rax54s_listing.txt"
-test $FIRMWARE_PATH $FIRMWARE_LISTING "RAX54S" "binwalk"
-
 # Download Mikrotik RB750Gr3 firmware
 FIRMWARE_PATH="/tmp/rb750gr3_firmware.npk"
 
@@ -88,3 +79,21 @@ curl "https://dlcdnets.asus.com/pub/ASUS/wireless/RT-AX86U_Pro/FW_RT_AX86U_PRO_3
 FIRMWARE_LISTING="$SCRIPT_DIR/results/ax86u_listing.txt"
 
 test $FIRMWARE_PATH $FIRMWARE_LISTING "RT-AX86U Pro" "binwalk,unblob"
+
+# Download D-Link AC2600 firmware
+FIRMWARE_PATH="/tmp/dlink_ac2600_firmware.zip"
+curl "https://support.dlink.com/resource/PRODUCTS/DIR-882/REVA/DIR-882_REVA_FIRMWARE_v1.30B06.zip" \
+    -o "$FIRMWARE_PATH"
+
+FIRMWARE_LISTING="$SCRIPT_DIR/results/ac2600_listing.txt"
+
+test $FIRMWARE_PATH $FIRMWARE_LISTING "D-Link AC2600" "binwalk,unblob"
+
+# Download NETGEAR AX5400 (RAX54S) firmware
+FIRMWARE_PATH="/tmp/rax54s_firmware.zip"
+
+curl "https://www.downloads.netgear.com/files/GDC/RAX54S/RAX54Sv2-V1.1.4.28.zip" \
+    -o "$FIRMWARE_PATH"
+
+FIRMWARE_LISTING="$SCRIPT_DIR/results/rax54s_listing.txt"
+test $FIRMWARE_PATH $FIRMWARE_LISTING "RAX54S" "binwalk"
