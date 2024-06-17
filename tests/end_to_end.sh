@@ -4,6 +4,7 @@ test() {
     FIRMWARE_PATH=$1
     FIRMWARE_LISTING=$2
     FIRMWARE_NAME=$3
+    EXTRACTORS=$4
 
     RED='\033[0;31m'
     GREEN='\033[0;32m'
@@ -25,7 +26,7 @@ test() {
 
     echo "Extracting ${FIRMWARE_NAME}..."
 
-    $SCRIPT_DIR/../fw2tar --output $FIRMWARE_PATH_OUT --force $FIRMWARE_PATH
+    $SCRIPT_DIR/../fw2tar --output $FIRMWARE_PATH_OUT --extractors $EXTRACTORS --force $FIRMWARE_PATH
 
     if ! [ -f "$ROOTFS" ]; then
         echo -e "${RED}Failed to extract ${FIRMWARE_NAME}${END}"
@@ -56,7 +57,7 @@ curl "https://static.tp-link.com/upload/firmware/2023/202308/20230818/Archer%20A
 
 FIRMWARE_LISTING="$SCRIPT_DIR/results/ax1800_listing.txt"
 
-test $FIRMWARE_PATH $FIRMWARE_LISTING "AX1800"
+test $FIRMWARE_PATH $FIRMWARE_LISTING "AX1800" "binwalk,unblob"
 
 # Download NETGEAR AX5400 (RAX54S) firmware
 FIRMWARE_PATH="/tmp/rax54s_firmware.zip"
@@ -65,7 +66,7 @@ curl "https://www.downloads.netgear.com/files/GDC/RAX54S/RAX54Sv2-V1.1.4.28.zip"
     -o "$FIRMWARE_PATH"
 
 FIRMWARE_LISTING="$SCRIPT_DIR/results/rax54s_listing.txt"
-test $FIRMWARE_PATH $FIRMWARE_LISTING "RAX54S"
+test $FIRMWARE_PATH $FIRMWARE_LISTING "RAX54S" "binwalk"
 
 # Download Mikrotik RB750Gr3 firmware
 FIRMWARE_PATH="/tmp/rb750gr3_firmware.npk"
@@ -75,7 +76,7 @@ curl "https://download.mikrotik.com/routeros/7.14.3/routeros-7.14.3-mmips.npk" \
 
 FIRMWARE_LISTING="$SCRIPT_DIR/results/rb750gr3_listing.txt"
 
-test $FIRMWARE_PATH $FIRMWARE_LISTING "RB750Gr3"
+test $FIRMWARE_PATH $FIRMWARE_LISTING "RB750Gr3" "unblob"
 
 # Download ASUS RT-AX86U Pro firmware
 
@@ -86,4 +87,4 @@ curl "https://dlcdnets.asus.com/pub/ASUS/wireless/RT-AX86U_Pro/FW_RT_AX86U_PRO_3
 
 FIRMWARE_LISTING="$SCRIPT_DIR/results/ax86u_listing.txt"
 
-test $FIRMWARE_PATH $FIRMWARE_LISTING "RT-AX86U Pro"
+test $FIRMWARE_PATH $FIRMWARE_LISTING "RT-AX86U Pro" "binwalk,unblob"
