@@ -106,3 +106,12 @@ curl "https://downloads.linksys.com/support/assets/firmware/FW_E8450_1.1.01.2729
 
 FIRMWARE_LISTING="$SCRIPT_DIR/results/linksys_ax3200_listing.txt"
 test $FIRMWARE_PATH $FIRMWARE_LISTING "Linksys AX3200" "unblob,binwalk"
+
+# Download Google WiFi Gale
+FIRMWARE_PATH="/tmp/google_wifi.zip"
+
+curl "https://dl.google.com/dl/edgedl/chromeos/recovery/chromeos_9334.41.3_gale_recovery_stable-channel_mp.bin.zip" \
+    -o "$FIRMWARE_PATH"
+
+FIRMWARE_LISTING="$SCRIPT_DIR/results/google_wifi_listing.txt"
+test $FIRMWARE_PATH $FIRMWARE_LISTING "Google WiFi" "unblob,binwalk"
