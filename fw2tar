@@ -95,7 +95,13 @@ fw2tar_run() {
             echo "Current directory is not named fw2tar but you requested a container rebuild"
             exit 1
         fi
-        DOCKER_BUILDKIT=1 docker build -t $image .
+
+        if [ ! -z "${SSH_AUTH_SOCK+x}" ]; then
+            # Build with ssh
+            DOCKER_BUILDKIT=1 docker build --build-arg SSH=1 --ssh default -t $image .
+        else
+            DOCKER_BUILDKIT=1 docker build -t $image .
+        fi
 
         # --build-singularity
         if $singularity; then

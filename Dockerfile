@@ -34,6 +34,7 @@ RUN apt-get update && \
     lziprecover \
     lzop \
     mtd-utils \
+    openssh-client \
     p7zip \
     p7zip-full \
     python3 \
@@ -91,13 +92,15 @@ RUN sh -c /unblob/unblob/install-deps.sh
 # that need to be created and read at runtime.
 RUN chmod -R 777 /root/
 
-# Install our custom fakeroot
-# Get fakeroot dependencies
-# Use sed to rewrite our soruces.list so we can get build-deps
-#RUN sed -i 's/^# deb-src/deb-src/' /etc/apt/sources.list
-#RUN apt-get update && apt-get build-dep -y fakeroot
-#RUN git clone https://github.com/rehosting/fakeroot.git /fakeroot
-#RUN cd /fakeroot && ./bootstrap && ./configure && make && make install -k || true
+# Try to install custom fakeroot. This is optional - we have regular fakeroot. If we're building
+# with host SSH keys, we can do this, otherwise we'll just skip it
+# Setup ssh keys for github.com
+RUN mkdir -p -m 0600 ~/.ssh && ssh-keyscan github.com >> ~/.ssh/known_hosts
+ARG SSH
+RUN --mount=type=ssh git clone git@github.com:rehosting/fakeroot.git /fakeroot && \
+    sed -i 's/^# deb-src/deb-src/' /etc/apt/sources.list && \
+    apt-get update && apt-get build-dep -y fakeroot && \
+    cd /fakeroot && ./bootstrap && ./configure && make && make install -k || true
 
 # Patch to fix unblob #767 that hasn't yet been upstreamed. Pip install didn't work. I don't understand poetry
 #RUN pip install git+https://github.com/qkaiser/arpy.git
