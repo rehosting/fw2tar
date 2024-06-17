@@ -97,3 +97,12 @@ curl "https://www.downloads.netgear.com/files/GDC/RAX54S/RAX54Sv2-V1.1.4.28.zip"
 
 FIRMWARE_LISTING="$SCRIPT_DIR/results/rax54s_listing.txt"
 test $FIRMWARE_PATH $FIRMWARE_LISTING "RAX54S" "binwalk"
+
+# Download Linksys AX3200
+FIRMWARE_PATH="/tmp/linksys_ax3200.img"
+
+curl "https://downloads.linksys.com/support/assets/firmware/FW_E8450_1.1.01.272918_PROD_unsigned.img" \
+    -o "$FIRMWARE_PATH"
+
+FIRMWARE_LISTING="$SCRIPT_DIR/results/linksys_ax3200_listing.txt"
+test $FIRMWARE_PATH $FIRMWARE_LISTING "Linksys AX3200" "unblob,binwalk"
