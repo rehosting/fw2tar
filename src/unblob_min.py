@@ -1,5 +1,4 @@
 import hashlib
-import ipdb
 import json
 import multiprocessing
 import os
@@ -7,12 +6,16 @@ import shutil
 import subprocess
 import sys
 import stat
+
 from collections import namedtuple, defaultdict, Counter
 from pathlib import Path
 from typing import Dict, List
+
 from unblob.processing import ExtractionConfig, process_file
 from unblob.logging import configure_logger
 from unblob import report
+
+from unifyroot import unify_filesystems
 
 def sha1sum_file(filename):
     sha1  = hashlib.sha1() # XXX: if minimum python version >= 3.9, pass usedforsecurity=False
@@ -317,3 +320,6 @@ if __name__ == '__main__':
         shutil.rmtree(output_dir)
     output_dir.mkdir(parents=True)
     extract_and_package(firmware, output_dir)
+
+    # Now we extracted into output dir. Let's unify
+    unify_filesystems(str(output_dir / "archives"), str(output_dir / 'unified.tar.gz'))
