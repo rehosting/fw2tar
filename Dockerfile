@@ -120,4 +120,7 @@ RUN echo '[ ! -z "$TERM" ] && [ -z "$NOBANNER" ] && /usr/local/bin/banner.sh' >>
 # fw2tar here is a simple shell wrapper to call fakeroot fw2tar.py
 COPY src/fw2tar src/fakeroot_fw2tar /usr/local/bin/
 
+COPY unifyroot /tmp/unifyroot
+RUN python3 -m pip install /tmp/unifyroot
+
 CMD ["/usr/local/bin/banner.sh"]
