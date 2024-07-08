@@ -47,6 +47,7 @@ RUN apt-get update && \
     unar \
     unrar-free \
     unzip \
+    uuid-runtime \
     xz-utils \
     zlib1g-dev \
     zstd
@@ -105,6 +106,9 @@ RUN --mount=type=ssh git clone git@github.com:rehosting/fakeroot.git /fakeroot &
 # Patch to fix unblob #767 that hasn't yet been upstreamed. Pip install didn't work. I don't understand poetry
 #RUN pip install git+https://github.com/qkaiser/arpy.git
 RUN curl "https://raw.githubusercontent.com/qkaiser/arpy/23faf88a88488c41fc4348ea2b70996803f84f40/arpy.py" -o /usr/local/lib/python3.10/dist-packages/arpy.py
+
+# Unblob package used for creating .tar.gz archives of partitions
+COPY src/package_partitions.sh /usr/local/bin/package_partitions.sh
 
 # Copy wrapper script into container so we can copy out - note we don't put it on guest path
 COPY ./fw2tar /usr/local/src/fw2tar_wrapper
