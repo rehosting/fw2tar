@@ -28,7 +28,7 @@ fw2tar_run() {
     while [[ $# -gt 0 ]]; do
         case "$1" in
             --wrapper-help)
-                echo "Usage: fw2tar [WRAPPER FLAGS] [FLAGS] FIRMWARE_FILE"
+                echo "Usage: fw2tar [WRAPPER FLAGS] [FLAGS] FIRMWARE_FILE OUTPUT_DIR"
                 echo "Wrapper script for running FW2TAR in a Docker container"
                 echo ""
                 echo "Wrapper-specific flags may be passed in *before* the fw2tar flags and args. If a value is required, it must be specified immediately after the flag with a space."
@@ -38,10 +38,6 @@ fw2tar_run() {
                 echo "  --verbose: Print verbose output for fw2tar wrapper (e.g., filesystem mappings, docker command)"
                 echo "  --wrapper-help: this message"
                 echo ""
-                echo "All other arguments will be passed through to the main fw2tar command in the container."
-                echo "For example try:"
-                echo "  fw2tar --help"
-                echo "  fw2tar ./your_firmware.bin"
                 exit 0
                 ;;
             --build)
@@ -122,34 +118,40 @@ fw2tar_run() {
         fi
     fi
 
-    # Check if last argument is a file, if so we'll need to map it
-    if [[ ${#cmd[@]} -gt 0 ]]; then
-        if [[ -f "${cmd[-1]}" ]]; then
-            local arg="${cmd[-1]}"
-            local abspath=$(realpath "$arg")
-            local host_path=$(dirname "$abspath")
-            local guest_path="/host_$(basename "$host_path")"
-            maps+=("$host_path:$guest_path")
-            cmd[-1]="/host_$(basename "$host_path")/$(basename "$arg")"
-        fi
+    # Ensure we have at lest 2 args at this point, otherwise raise a usage message
+    if [[ ${#cmd[@]} -lt 2 ]]; then
+	echo "Usage: fw2tar [WRAPPER FLAGS] [FLAGS] FIRMWARE_FILE OUTPUT_DIR"
+	echo "		    Try --wrapper-help for additional help"
+	exit 1
     fi
 
-    # Check for "--output" flag, create and map the directory as necessary
-    for ((i=0; i<${#cmd[@]}; i++)); do
-        if [[ "${cmd[$i]}" == "--output" && $((i+1)) -lt ${#cmd[@]} ]]; then
-            output_dir="${cmd[$i+1]}"
-            if [[ ! -d "$output_dir" ]]; then
-                mkdir -p "$output_dir"
-            fi
 
-            # Add mapping for the output directory
-            local abspath=$(realpath "$output_dir")
-            local guest_path="/host_$(basename "$abspath")"
-            maps+=("$abspath:$guest_path")
-            cmd[$i+1]="/host_$(basename "$abspath")/$(basename "$output_dir")"
+    # Second to last argument should be the firmware file. This file should already exist
+    if [[ -f "${cmd[-2]}" ]]; then
+        local arg="${cmd[-2]}"
+        local abspath=$(realpath "$arg")
+        local host_path=$(dirname "$abspath")
+        local guest_path="/host_$(basename "$host_path")"
+        maps+=("$host_path:$guest_path")
+        #cmd[-2]="/host_$(basename "$host_path")/$(basename "$arg")"
+        firmware_file="/host_$(basename "$host_path")/$(basename "$arg")"
+    else
+        echo "Fatal error: Firmware file not found: ${cmd[-2]}"
+    fi
 
-        fi
-    done
+    # Final argument should be the output directory
+    output_dir="${cmd[-1]}"
+    if [[ ! -d "$output_dir" ]]; then
+        mkdir -p "$output_dir"
+    fi
+
+    local arg="${cmd[-1]}"
+    local abspath=$(realpath "$arg")
+    local host_path=$(dirname "$abspath")
+    local guest_path="/host_$(basename "$host_path")"
+    maps+=("$host_path:$guest_path")
+    #cmd[-1]="/host_$(basename "$host_path")/$(basename "$arg")"
+    output_dir="/host_$(basename "$host_path")/$(basename "$arg")"
 
     # Check for "--scratch-dir" flag, create and map the directory as necessary
     for ((i=0; i<${#cmd[@]}; i++)); do
@@ -191,12 +193,15 @@ fw2tar_run() {
 
 
     docker_cmd+=("$image")
-    docker_cmd+=("fakeroot_fw2tar")
-    docker_cmd+=("${cmd[@]}")
+    #docker_cmd+=("fakeroot_fw2tar")
+    docker_cmd+=("fakeroot" "/usr/local/bin/package_partitions.sh")
+    docker_cmd+=("${firmware_file}")
+    docker_cmd+=("${output_dir}")
 
     if $verbose; then
         echo "${BOLD}Fw2tar command:${RESET}"
-        echo "  fw2tar ${cmd[@]}"
+        #echo "  fw2tar ${cmd[@]}"
+        echo "  fakeroot /usr/local/bin/unblob_package.sh ${cmd[@]}"
         echo
 
         echo "${BOLD}Complete docker commands:${RESET}"
