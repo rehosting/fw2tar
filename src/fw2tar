@@ -257,6 +257,7 @@ def extract_and_process(extractor, infile, outfile_base, scratch_dir, start_time
 
         for idx, (root, size, nfiles) in enumerate(rootfs_choices):
             if idx >= primary_limit:
+                print(f"WARNING: skipping linux filesystem ({root}), if files are missing you may need to set primary_limit higher")
                 break
             tarbase = f"{outfile_base}.{extractor}.{idx}"
             if verbose:
