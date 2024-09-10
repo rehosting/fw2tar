@@ -145,34 +145,50 @@ def find_all_filesystems(start_dir, other_than=None):
     # Return list of tuples (Path, size, nfiles) for each filesystem
     return [(Path(fs['path']), fs['size'], fs['nfiles']) for fs in sorted_filesystems]
 
+def find_devices_in_dir(directory):
+    devices = []
+    for root, _, files in os.walk(directory):
+        for file in files:
+            path = os.path.join(root, file)
+            try:
+                mode = os.stat(path).st_mode
+                if stat.S_ISCHR(mode) or stat.S_ISBLK(mode):
+                    rel_path = os.path.relpath(path, directory)
+                    devices.append(rel_path)
+            except OSError:
+                pass  # Skip files we can't access
+    return devices
 
 def _tar_fs(rootfs_dir, tarbase):
     # First, define the name of the uncompressed tar archive (temporary name)
     uncompressed_outfile = f"{tarbase}.tar"
+
+    # Find all character and block devices in rootfs_dir
+    devices_to_ignore = find_devices_in_dir(rootfs_dir)
+
     tar_command = [
         "tar",
         "-cf",
         uncompressed_outfile,
         "--sort=name",
         "--mtime=UTC 2019-01-01",
-
-        #"--xattrs", # Introduces non-determinism
-
         # Common binwalk artifacts:
-            "--exclude=0.tar",
-            "--exclude=squashfs-root",
-
+        "--exclude=0.tar",
+        "--exclude=squashfs-root",
         # Unblob artifacts
-            "--exclude=*_extract",
-            "--exclude=*.uncompressed",
-            "--exclude=*.unknown",
+        "--exclude=*_extract",
+        "--exclude=*.uncompressed",
+        "--exclude=*.unknown",
+    ]
 
-        # Don't want to take devices, permissions are a pain and tar complains about character devices
-            "--exclude=./dev",
+    # Exclude devices
+    tar_command.extend(f"--exclude=./{x}" for x in devices_to_ignore)
 
+    # Add final arguments
+    tar_command.extend([
         "-C", str(rootfs_dir),
         "."
-    ]
+    ])
 
     # We want the root directory: ./ to have consistent permissions
     # we'll just set it to 755. NOT RECURSIVE
