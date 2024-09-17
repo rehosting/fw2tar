@@ -152,6 +152,10 @@
 ./cifs2/                                                                      root/root  drwxr-xr-x  0         2019-01-01
 ./data/                                                                       root/root  drwxrwxr-x  0         2019-01-01
 ./debug                                                                       root/root  lrwxrwxrwx  0         2019-01-01
+./dev/                                                                        root/root  drwxr-xr-x  0         2019-01-01
+./dev/fuse                                                                    root/root  lrwxrwxrwx  0         2019-01-01
+./dev/misc/                                                                   root/root  drwxrwxr-x  0         2019-01-01
+./dev/misc/fuse                                                               root/root  lrwxrwxrwx  0         2019-01-01
 ./etc                                                                         root/root  lrwxrwxrwx  0         2019-01-01
 ./home                                                                        root/root  lrwxrwxrwx  0         2019-01-01
 ./jffs/                                                                       root/root  drwxr-xr-x  0         2019-01-01
