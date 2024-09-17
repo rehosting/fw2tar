@@ -1,5 +1,7 @@
 #!/bin/bash
 
+failures=0
+
 test() {
     FIRMWARE_PATH=$1
     FIRMWARE_LISTING=$2
@@ -40,7 +42,7 @@ test() {
     else
         if ! diff --color=always "$OLD_FIRMWARE_LISTING" "$NEW_FIRMWARE_LISTING"; then
             echo -e "${RED}Listings for ${FIRMWARE_NAME} do not match.${END} To approve changes replace ${OLD_FIRMWARE_LISTING} with ${NEW_FIRMWARE_LISTING}"
-            exit 1
+	    failures=$((failures+1))
         else
             echo -e "${GREEN}Firmware listing matches for ${FIRMWARE_NAME}.${END}"
         fi
@@ -115,3 +117,8 @@ curl "https://dl.google.com/dl/edgedl/chromeos/recovery/chromeos_9334.41.3_gale_
 
 FIRMWARE_LISTING="$SCRIPT_DIR/results/google_wifi_listing.txt"
 test $FIRMWARE_PATH $FIRMWARE_LISTING "Google WiFi" "unblob,binwalk"
+
+if [[ "$failures" -gt 0 ]]; then
+    echo "Saw $failures during test"
+    exit 1
+fi
