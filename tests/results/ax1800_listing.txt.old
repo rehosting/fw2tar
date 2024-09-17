@@ -56,6 +56,7 @@
 ./bin/usleep                                                                                               root/root  lrwxrwxrwx  0        2019-01-01
 ./bin/vi                                                                                                   root/root  lrwxrwxrwx  0        2019-01-01
 ./bin/zcat                                                                                                 root/root  lrwxrwxrwx  0        2019-01-01
+./dev/                                                                                                     root/root  drwxrwxrwx  0        2019-01-01
 ./etc/                                                                                                     root/root  drwxrwxrwx  0        2019-01-01
 ./etc/MAC_OUI.map                                                                                          root/root  -rwxrwxrwx  793624   2019-01-01
 ./etc/MT7915_EEPROM.bin                                                                                    root/root  -rwxrwxrwx  3584     2019-01-01

@@ -212,6 +212,7 @@
 ./bndl/wifi/nova/lib/console/                                        root/root  drwxr-xr-x  0        2019-01-01
 ./bndl/wifi/nova/lib/console/1275068416.mem                          root/root  -rwxr-xr-x  171399   2019-01-01
 ./boot/                                                              root/root  drwxr-xr-x  0        2019-01-01
+./dev/                                                               root/root  drwxr-xr-x  0        2019-01-01
 ./dude                                                               root/root  lrwxrwxrwx  0        2019-01-01
 ./etc/                                                               root/root  drwxr-xr-x  0        2019-01-01
 ./etc/license                                                        root/root  -rw-r--r--  123670   2019-01-01

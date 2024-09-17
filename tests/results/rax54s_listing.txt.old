@@ -206,6 +206,10 @@
 ./data/                                                                                                                   root/root  drwxrwxr-x  0         2019-01-01
 ./data/licenses/                                                                                                          root/root  drwxrwxr-x  0         2019-01-01
 ./debug                                                                                                                   root/root  lrwxrwxrwx  0         2019-01-01
+./dev/                                                                                                                    root/root  drwxrwxr-x  0         2019-01-01
+./dev/fuse                                                                                                                root/root  lrwxrwxrwx  0         2019-01-01
+./dev/misc/                                                                                                               root/root  drwxrwxr-x  0         2019-01-01
+./dev/misc/fuse                                                                                                           root/root  lrwxrwxrwx  0         2019-01-01
 ./etc/                                                                                                                    root/root  drwxr-xr-x  0         2019-01-01
 ./etc/CH_string_table                                                                                                     root/root  -rw-rw-r--  69607     2019-01-01
 ./etc/CS_string_table                                                                                                     root/root  -rw-rw-r--  81356     2019-01-01

@@ -75,6 +75,7 @@
 ./bin/vi                                                                            root/root  lrwxrwxrwx  0         2019-01-01
 ./bin/wget                                                                          root/root  lrwxrwxrwx  0         2019-01-01
 ./bin/zcat                                                                          root/root  lrwxrwxrwx  0         2019-01-01
+./dev/                                                                              root/root  drwxr-xr-x  0         2019-01-01
 ./etc/                                                                              root/root  drwxr-xr-x  0         2019-01-01
 ./etc/Makefile                                                                      root/root  -rwxr-xr-x  1047      2019-01-01
 ./etc/TZ                                                                            root/root  lrwxrwxrwx  0         2019-01-01

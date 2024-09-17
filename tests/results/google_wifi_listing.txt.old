@@ -95,6 +95,8 @@
 ./bin/yes                                                                                                                        root/root  -rwx------  50       2019-01-01
 ./bin/ypdomainname                                                                                                               root/root  lrwxrwxrwx  0        2019-01-01
 ./bin/zcat                                                                                                                       root/root  -rwx------  1940     2019-01-01
+./dev/                                                                                                                           root/root  drwx------  0        2019-01-01
+./dev/null/                                                                                                                      root/root  drwx------  0        2019-01-01
 ./etc/                                                                                                                           root/root  drwx------  0        2019-01-01
 ./etc/DIR_COLORS                                                                                                                 root/root  -rwx------  4911     2019-01-01
 ./etc/ap/                                                                                                                        root/root  drwx------  0        2019-01-01
