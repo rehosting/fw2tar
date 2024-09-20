@@ -21,6 +21,17 @@ jobs:
 
       - name: Checkout code
         uses: actions/checkout@v4
+      
+      - name: Setup runner
+        run: |
+              sudo apt-get update;
+              sudo apt-get install -yy curl jq
+
+      - name: Get next version
+        uses: reecetech/version-increment@2024.4.4
+        id: version
+        with:
+          use_api: true
 
       - name: Build Docker image
         id: docker_build
@@ -30,6 +41,7 @@ jobs:
           push: true
           tags: |
             rehosting/fw2tar:${{ github.sha }}
+            rehosting/fw2tar:${{ steps.version.outputs.version }}
             rehosting/fw2tar:latest
           cache-from: type=registry,ref=rehosting/fw2tar:latest
           cache-to: type=inline
