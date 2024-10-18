@@ -388,7 +388,10 @@ def main(infile, outfile_base, scratch_dir="/tmp", extractors=None, verbose=Fals
             # Record the type of difference
             tar_result = {}
             for path in paths:
-                tar_result[path] = subprocess.check_output(["tar", "tvf", path]).decode("utf-8", errors="ignore").splitlines()
+                if not os.path.isfile(path):
+                    tar_result[path] = []
+                else:
+                    tar_result[path] = subprocess.check_output(["tar", "tvf", path]).decode("utf-8", errors="ignore").splitlines()
 
             # First check: are line counts different?
             line_counts = {path: len(tar_result[path]) for path in paths}
