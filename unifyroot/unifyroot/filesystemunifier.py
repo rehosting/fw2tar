@@ -2,12 +2,15 @@ import string
 import os
 import tempfile
 import subprocess
+import re
 from copy import deepcopy
 
 from collections import defaultdict
 from typing import Dict, Set, List, Tuple, Optional
 
 from .common import FilesystemInfo, FilesystemRepository
+
+INVALID_ROOTS = ("./proc", "./sys", "./dev", "./tmp")
 
 class FilesystemUnifier:
     def __init__(self, repository: FilesystemRepository):
@@ -69,11 +72,32 @@ class FilesystemUnifier:
         best_score = self._calculate_configuration_score(mount_points, unresolved_paths)
 
         print(f"{mount_points} has score {best_score}. Trying to improve with more filesystems...")
+
+        # Collect symlinks that exist within the mount points we've defined
+        # We *should not* add a filesystem at a symlink, that wouldn't really make sense
+        # though we could resolve them and analyze it more
+        # For example if we have ./var -> ./tmp, we shouldn't place anything at ./var because
+        # we don't want to add things to /tmp.
+        # If we have ./etc -> ./etc/var we should place things at ./etc/var and not at ./etc
+        symlinks = {}
+        for mount_point, existing_name in mount_points.items():
+            fs_info = self.repository.get_filesystem(existing_name)
+            for link, target in fs_info.links.items():
+                link_dest = os.path.join(os.path.dirname(mount_point + link[2:]), target)
+                if not link_dest.startswith("."):
+                    if link_dest.startswith("/"):
+                        prefix = "."
+                    else:
+                        prefix = "./"
+                    link_dest = prefix + link_dest
+
+                symlinks[mount_point + link[2:]] = link_dest
+
         best_config = mount_points.copy()
 
         for fs_name in remaining_filesystems:
             fs_info = self.repository.get_filesystem(fs_name)
-            mount_point, score_improvement = self._find_best_mount_point(mount_points, fs_info, unresolved_paths)
+            mount_point, score_improvement = self._find_best_mount_point(mount_points, fs_info, unresolved_paths, symlinks)
 
             if mount_point and score_improvement > 0:
                 new_mount_points = mount_points.copy()
@@ -86,7 +110,7 @@ class FilesystemUnifier:
 
         return best_config, best_score
 
-    def _find_best_mount_point(self, cur_mounts: Dict[str, str], fs_info: FilesystemInfo, unresolved_paths: Set[str]) -> Tuple[Optional[str], float]:
+    def _find_best_mount_point(self, cur_mounts: Dict[str, str], fs_info: FilesystemInfo, unresolved_paths: Set[str], symlinks: Dict[str, str]) -> Tuple[Optional[str], float]:
         """
         Finds the best mount point for a filesystem based on how many unresolved paths it can resolve.
 
@@ -101,7 +125,7 @@ class FilesystemUnifier:
         best_mount_point = None
         best_score_improvement = 0
         visible_paths = self._get_visible_paths(cur_mounts)
-        potential_mounts = self._find_potential_mount_points(cur_mounts, fs_info, unresolved_paths)
+        potential_mounts = self._find_potential_mount_points(cur_mounts, fs_info, unresolved_paths, symlinks)
 
         for potential_mount_point in potential_mounts:
             resolved_paths = self._get_resolved_paths(visible_paths, potential_mount_point, fs_info, unresolved_paths)
@@ -111,12 +135,22 @@ class FilesystemUnifier:
             new_mounts[potential_mount_point] = fs_info.name
             # Combine all visible paths into a single set
             total_files_with_mount = set.union(*self._get_visible_paths(new_mounts).values())
-            print(f"\t{cur_mounts} + {fs_info.name} @ {potential_mount_point} resolves {len(resolved_paths)} paths and adds {total_files_in_mount} files to get {len(total_files_with_mount)} total files")
+
+            # XXX: We don't want to lose/shadow too many files. Specifically we probably don't want to lose files
+            # from our root filesystem, but shadowing files is generally probably bad
+            lost_files = []
+            for _, files in visible_paths.items():
+                lost_files.extend([x for x in files if x.startswith(potential_mount_point)])
+
+            print(f"\t{cur_mounts} + {fs_info.name} @ {potential_mount_point} resolves {len(resolved_paths)} paths, adds {total_files_in_mount} files, loses {len(lost_files)} to get {len(total_files_with_mount)} total files")
             print(f"\t\t {' '.join(resolved_paths[:10])}")
 
             # XXX: is our improvement just the number of resolved paths?
             # What if this mount just resolves like 1 path and adds a bunch of broken references? On the other hand, what if it's just 1 path and we're fixing it
-            if len(resolved_paths) > 2:
+            if len(lost_files) > 5:
+                # Probably bad, we don't want to shadow too many files
+                score_improvement = 0
+            elif len(resolved_paths) > 2:
                 # If we resolve more than 2 paths, we're probably doing well
                 score_improvement = len(resolved_paths)
             elif len(resolved_paths) == 0:
@@ -166,6 +200,8 @@ class FilesystemUnifier:
         """
         Identifies unresolved paths in the context of currently mounted filesystems.
 
+        Filters out paths that are invalid linux paths or in /dev or /tmp
+
         Args:
             mount_points (Dict[str, str]): Current mapping of mount points to filesystem names.
 
@@ -212,58 +248,7 @@ class FilesystemUnifier:
             return path[len(mount_point):].lstrip('/')
         return path
 
-    def _find_best_filesystem_to_mount(self, unresolved_paths: Set[str], remaining_filesystems: Set[str]) -> Tuple[Optional[FilesystemInfo], str]:
-        """
-        Finds the best filesystem to mount next based on how many unresolved paths it can resolve.
-
-        Args:
-            unresolved_paths (Set[str]): Current set of unresolved paths.
-            remaining_filesystems (Set[str]): Set of filesystems not yet mounted.
-
-        Returns:
-            Tuple[Optional[FilesystemInfo], str]: The best filesystem to mount and its mount point, or (None, "") if no suitable filesystem is found.
-        """
-        best_score = float('-inf')
-        best_fs = None
-        best_mount_point = ""
-
-        for fs_name in remaining_filesystems:
-            fs_info = self.repository.get_filesystem(fs_name)
-            mount_point, score = self._evaluate_mount_point(fs_info, unresolved_paths)
-            if mount_point is None:
-                continue
-            print(f"\t Adding {fs_info.name} to {mount_point} yields score {score}")
-            if score > best_score:
-                best_score = score
-                best_fs = fs_info
-                best_mount_point = mount_point
-
-        return best_fs, best_mount_point
-
-    def _evaluate_mount_point(self, cur_mounts: Dict[str, str], fs_info: FilesystemInfo, unresolved_paths: Set[str]) -> Tuple[str, float]:
-        """
-        Evaluates potential mount points for a filesystem and returns the best one with its score.
-
-        Args:
-            cur_mounts (Dict[str, str]): Current mapping of mount points to filesystem names.
-            fs_info (FilesystemInfo): Information about the filesystem to evaluate.
-            unresolved_paths (Set[str]): Current set of unresolved paths.
-
-        Returns:
-            Tuple[str, float]: The best mount point and its score.
-        """
-        best_mount_point = None
-        best_score = float('-inf')
-
-        for potential_mount_point in self._find_potential_mount_points(fs_info, unresolved_paths):
-            score = self._calculate_mount_point_score(potential_mount_point, fs_info, unresolved_paths)
-            if score > best_score:
-                best_score = score
-                best_mount_point = potential_mount_point
-
-        return best_mount_point, best_score
-
-    def _find_potential_mount_points(self, cur_mounts: Dict[str, str], fs_info: FilesystemInfo, unresolved_paths: Set[str]) -> List[str]:
+    def _find_potential_mount_points(self, cur_mounts: Dict[str, str], fs_info: FilesystemInfo, unresolved_paths: Set[str], symlinks: Dict[str, str]) -> List[str]:
         """
         Finds potential mount points for a filesystem based on unresolved paths.
 
@@ -282,6 +267,12 @@ class FilesystemUnifier:
             for fs_path in fs_info.paths:
                 potential_mount_point = self._get_potential_mount_point(unresolved_path, fs_path)
                 if potential_mount_point and potential_mount_point != '.':
+                    while potential_mount_point in symlinks:
+                        # "resolve" symlink
+                        potential_mount_point = symlinks[potential_mount_point]
+
+                    if self._is_unlikely_mount(potential_mount_point):
+                        continue
                     if self._is_valid_new_mount_point(potential_mount_point, cur_mounts):
                         mount_point_candidates[potential_mount_point].add(unresolved_path)
 
@@ -296,6 +287,32 @@ class FilesystemUnifier:
         # Step 3: Sort and return the results
         return sorted(potential_mount_points, key=potential_mount_points.get, reverse=True)
 
+    def _is_unlikely_mount(self, potential_mount_point: str) -> bool:
+        '''
+        We see some common patterns of invalid mount points - save some time by skipping them.
+        Shouldn't really make a difference in terms of end results, but simplifies debugging
+        '''
+        # Domain names
+        if "www." in potential_mount_point or \
+                potential_mount_point.endswith(".com") or \
+                ".com/" in potential_mount_point:
+            return True
+
+        # compiler directories
+        if "-none-" in potential_mount_point or \
+                "-gcc-" in potential_mount_point or \
+                "-clang-" in potential_mount_point or \
+                "-gnu" in potential_mount_point:
+            return True
+
+        # Long
+        if len(potential_mount_point) > 30:
+            return True
+
+        # Otherwise it's probably fine
+        return False
+
+
     def _is_valid_new_mount_point(self, new_mount: str, cur_mounts: Dict[str, str]) -> bool:
         """
         Checks if a new mount point is valid given the current mount points.
@@ -307,6 +324,9 @@ class FilesystemUnifier:
         Returns:
             bool: True if the new mount point is valid, False otherwise.
         """
+        if new_mount in INVALID_ROOTS:
+            return False
+
         for existing_mount in cur_mounts:
             if new_mount == existing_mount:
                 return False  # Prevent mounting at the same point
@@ -338,7 +358,7 @@ class FilesystemUnifier:
 
         if unresolved_path.endswith(fs_path[1:]):
             result = unresolved_path[:-len(fs_path) + 1]
-            if not result.startswith(("./proc", "./sys", "./dev", "./tmp")):
+            if not result.startswith(INVALID_ROOTS):
                 return result
 
         return None
