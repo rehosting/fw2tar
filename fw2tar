@@ -23,17 +23,21 @@ fw2tar_run() {
     local singularity=false
     local verbose=false
     local image="rehosting/fw2tar" # Name of container instance
+    local partition_dir=""
+    local force=false
 
     # Process each command-line argument
     while [[ $# -gt 0 ]]; do
         case "$1" in
             --wrapper-help)
-                echo "Usage: fw2tar [WRAPPER FLAGS] [FLAGS] FIRMWARE_FILE OUTPUT_DIR"
+                echo "Usage: fw2tar [WRAPPER FLAGS] [FLAGS] [FIRMWARE_BLOB] [FINAL_ARCHIVE.tar.gz]"
                 echo "Wrapper script for running FW2TAR in a Docker container"
                 echo ""
                 echo "Wrapper-specific flags may be passed in *before* the fw2tar flags and args. If a value is required, it must be specified immediately after the flag with a space."
                 echo "  --build: Build the fw2tar container before running the specified command. If no other arguments are provided, the container will be built and the script will exit."
                 echo "  --build-singularity: Build the fw2tar container as a sif."
+                echo "  --force: Remove existing output file and scratch directory if they exists."
+                echo "  --partition_dir: Specify a directory to produce partition archives into. The directory will be deleted if --force is set."
                 echo "  --image: Which image to run. Default: $image"
                 echo "  --verbose: Print verbose output for fw2tar wrapper (e.g., filesystem mappings, docker command)"
                 echo "  --wrapper-help: this message"
@@ -51,6 +55,14 @@ fw2tar_run() {
             --build-singularity)
                 build=true
                 singularity=true
+                shift
+                ;;
+            --partition_dir)
+                partition_dir="$2"
+                shift 2
+                ;;
+            --force)
+                force=true
                 shift
                 ;;
             --image)
@@ -85,7 +97,7 @@ fw2tar_run() {
 
     if $build; then
         echo "Running with container build (--build). Entire container will be rebuilt and tagged as $image."
-        # Make sure we have Dockerfile and directory is namedfw2tar 
+        # Make sure we have Dockerfile and directory is named fw2tar
         if [ ! -f "Dockerfile" ]; then
             echo "Dockerfile not found in current directory and you requested a container rebuild"
             exit 1
@@ -135,10 +147,18 @@ fw2tar_run() {
         echo "Fatal error: Firmware file not found: ${cmd[-2]}"
     fi
 
-    # Final argument should be the output directory
+    # Final argument should be the output directory path. XXX now a filename
     output_dir="${cmd[-1]}"
-    if [[ ! -d "$output_dir" ]]; then
-        mkdir -p "$output_dir"
+
+    if [ -e "$output_dir" ]; then
+        if $force; then
+            echo "Removing existing output file: $output_dir"
+            rm -f "$output_dir"
+        else
+            echo "Error: Output file already exists: $output_dir"
+            echo "Re-run with --force to remove it or delete it yourself first."
+            exit 1
+        fi
     fi
 
     local arg="${cmd[-1]}"
@@ -149,22 +169,28 @@ fw2tar_run() {
     #cmd[-1]="/host_$(basename "$host_path")/$(basename "$arg")"
     output_dir="/host_$(basename "$host_path")/$(basename "$arg")"
 
-    # Check for "--scratch-dir" flag, create and map the directory as necessary
-    for ((i=0; i<${#cmd[@]}; i++)); do
-        if [[ "${cmd[$i]}" == "--scratch-dir" && $((i+1)) -lt ${#cmd[@]} ]]; then
-            scratch_dir="${cmd[$i+1]}"
-            if [[ ! -d "$scratch_dir" ]]; then
-                mkdir -p "$scratch_dir"
+
+    # If we have a scratch dir set - make sure it exists and empty it
+    if [[ ! -z "$partition_dir" ]]; then
+        echo "Scratch directory set: $partition_dir"
+        # If it's already here, make sure it's empty
+        if [[ -e "$partition_dir" ]]; then
+            echo "Scratch directory exists force is $force"
+            if ! $force; then
+                echo "Error: Scratch directory is not empty: $partition_dir"
+                echo "Re-run with --force to remove it or delete it yourself first."
+                exit 1
             fi
-
-            # Add mapping for the scratch directory
-            local abspath=$(realpath "$scratch_dir")
-            local guest_path="/scratch"
-            maps+=("$abspath:$guest_path")
-            cmd[$i+1]="/scratch"
-
+            if $force; then
+                echo "Removing scratch directory: $partition_dir"
+                rm -rf "$partition_dir"
+            fi
         fi
-    done
+        mkdir -p "$partition_dir"
+        local abspath=$(realpath "$partition_dir")
+        local guest_path="/scratch"
+        maps+=("$abspath:$guest_path")
+    fi
 
     # Sort mappings by path length
     IFS=$'\n' maps=($(sort -r <<<"${maps[*]}"))
@@ -194,10 +220,15 @@ fw2tar_run() {
     docker_cmd+=("${firmware_file}")
     docker_cmd+=("${output_dir}")
 
+    # If we have partition_dir non-empty, add /scratch as final arg
+    if [[ ! -z "$partition_dir" ]]; then
+        docker_cmd+=("/scratch")
+    fi
+
     if $verbose; then
         echo "${BOLD}Fw2tar command:${RESET}"
         #echo "  fw2tar ${cmd[@]}"
-        echo "  fakeroot /usr/local/bin/unblob_package.sh ${cmd[@]}"
+        echo "  fakeroot /usr/local/bin/package_partitions.sh ${cmd[@]}"
         echo
 
         echo "${BOLD}Complete docker commands:${RESET}"

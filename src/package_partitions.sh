@@ -1,24 +1,22 @@
 #!/bin/bash
 set -eu
 
-# USAGE: ./unblob_package.sh firmware output_root
-
-#if [ "$#" -ne 2 ]; then
-#    echo "Usage: $0 [firmware] [output_dir]"
-#    exit 1
-#fi
-
+# USAGE: ./unblob_package.sh firmware result_archive [tmp]
 
 # First we run unblob with a temporary directory to extract the files
 # Then we package potential rootfs files into tar.gz archives
 
 firmware="$1"
-output_dir="$2"
-mkdir -p "$output_dir"
-chmod 777 "$output_dir"
+output="$2"
+# third argument is optional
+tmpbase=${3:-$(mktemp -d)}
+mkdir -p "$tmpbase"
+chmod 777 "$tmpbase"
+
+hashed_partitions_dir=$(mktemp -d -p "$tmpbase")
 
 # Stage 1: Run unblob on the provided firmware
-extract_dir=$(mktemp -d)
+extract_dir=$(mktemp -d -p "$tmpbase")
 log_scratch=$(mktemp) # Can't write unblob.log into /
 unblob -k "$firmware" -e "$extract_dir" --log "${log_scratch}"
 rm ${log_scratch}
@@ -42,10 +40,9 @@ find "$extract_dir" -type f -name 'control' | while read -r control_file; do
 done
 
 # Archive all potential rootfs directories into a temporary directory
-temp_dir=$(mktemp -d)
 find $extract_dir -type d \( -name "*_carve" -o -name "*_extract" \) | while read -r dir; do
     # Create a name for the archive
-    temp_archive="$temp_dir/$(uuidgen).tar.gz"
+    temp_archive="$hashed_partitions_dir/$(uuidgen).tar.gz"
 
     # Create the archive, excluding subdirectories ending with '_carve' '_extract' or '_uncompressed'
     # Also filter out ###-####.[ext] files, which are almost always unblob artifacts (e.g., 0-100.lzma)
@@ -73,11 +70,13 @@ while read -r size file; do
     new_filename="${file_hash}.tar.gz"
 
     # Move and rename the file
-    mv "$file" "$output_dir/$new_filename"
+    mv "$file" "$hashed_partitions_dir/$new_filename"
 
     echo "Packaged $new_filename (size: $size, nfiles: $nfiles)"
-done < <(find "$temp_dir" -type f -name "*.tar.gz" -print0 | xargs -0 du -s | sort -rn)
+done < <(find "$hashed_partitions_dir" -type f -name "*.tar.gz" -print0 | xargs -0 du -s | sort -rn)
 
 # Don't create root-owned files that end users can't delete in mapped directories
-chmod 777 "${output_dir}/"*
-rm -rf "$temp_dir"
+chmod 777 "${hashed_partitions_dir}/"*
+
+# Now call unify
+python3 -m unifyroot.cli "$hashed_partitions_dir" "$output" "$extract_dir" "$tmpbase"

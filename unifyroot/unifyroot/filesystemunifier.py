@@ -423,14 +423,19 @@ class FilesystemUnifier:
 
         return visible_paths
 
-    def create_archive(self, archive_dir, mounts, output):
+    def create_archive(self, archive_dir, mounts, output, tmp_base=None):
         # Create a temporary directory, then extract filesystems from self.repository at the mount
         # points and package it up
-        with tempfile.TemporaryDirectory() as temp_dir:
+        #with tempfile.TemporaryDirectory() as temp_dir:
+
+        # If tmp_base is None, we'll use a temporary directory in the system's default location
+        # otherwise it's within the specified dir
+        with tempfile.TemporaryDirectory(dir=tmp_base) as temp_dir:
             for mount_point, fs_name in mounts.items():
                 fs_info = self.repository.get_filesystem(fs_name)
                 src = os.path.join(archive_dir, fs_info.name)
                 dest = os.path.join(temp_dir, mount_point)
+
 
                 # Ensure dest is within temp_dir
                 if not os.path.commonpath([temp_dir, dest]) == temp_dir:
@@ -442,6 +447,11 @@ class FilesystemUnifier:
                 # Extract
                 subprocess.check_output(["tar", "xf", src, "-C", dest])
 
+            # Log the best mount points into a file
+            with open(os.path.join(temp_dir, ".mounts.csv"), "w") as f:
+                f.write("mount_point,archive\n")
+                for archive, mount_point in mounts.items():
+                    f.write(f"{archive},{mount_point}\n")
 
             # All done - package it up
             subprocess.check_output(["tar", "czf", output, "-C", temp_dir, "."])
