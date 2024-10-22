@@ -10,7 +10,7 @@ from typing import Dict, Set, List, Tuple, Optional
 
 from .common import FilesystemInfo, FilesystemRepository
 
-INVALID_ROOTS = ("./proc", "./sys", "./dev", "./tmp")
+INVALID_ROOTS = ("./proc", "./sys", "./dev") # Refuse to consider mounts at these points
 
 class FilesystemUnifier:
     def __init__(self, repository: FilesystemRepository):
