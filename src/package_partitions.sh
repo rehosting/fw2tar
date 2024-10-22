@@ -7,9 +7,14 @@ set -eu
 # Then we package potential rootfs files into tar.gz archives
 
 firmware="$1"
-output="$2"
+output="${2:-}" # Second argument, the output archive
 # third argument is optional partition_dir
 partition_dir=${3:-}
+
+# if ouptut isn't set default is firmware+.rootfs.tar.gz
+if [ -z "$output" ]; then
+    output="${firmware##*/}.rootfs.tar.gz"
+fi
 
 hashed_partitions_dir=$(mktemp -d)
 extract_dir=$(mktemp -d) # If user specified a partition_dir, we'll move files from here later

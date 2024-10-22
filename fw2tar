@@ -26,6 +26,7 @@ fw2tar_run() {
     local partition_dir=""
     local force=false
     local scratch_dir=""
+    local output=""
 
     # Process each command-line argument
     while [[ $# -gt 0 ]]; do
@@ -37,6 +38,7 @@ fw2tar_run() {
                 echo "Wrapper-specific flags may be passed in *before* the fw2tar flags and args. If a value is required, it must be specified immediately after the flag with a space."
                 echo "  --build: Build the fw2tar container before running the specified command. If no other arguments are provided, the container will be built and the script will exit."
                 echo "  --build-singularity: Build the fw2tar container as a sif."
+                echo "  --output: Specify the output file or directory to write the final archive to. If a directory, the archive will be named <input basename>.tar.gz. If the file exists, it will be removed if --force is set."
                 echo "  --force: Remove existing output file and scratch directory if they exists."
                 echo "  --scratch_dir: Specify a directory to use as a scratch directory"
                 echo "  --partition_dir: Specify a directory to produce partition archives into. The directory will be deleted if --force is set."
@@ -65,6 +67,10 @@ fw2tar_run() {
                 ;;
             --scratch_dir)
                 scratch_dir="$2"
+                shift 2
+                ;;
+            --output)
+                output="$2"
                 shift 2
                 ;;
             --force)
@@ -140,41 +146,48 @@ fw2tar_run() {
         fi
     fi
 
-    # Second to last argument should be the firmware file. This file should already exist
-    if [[ -f "${cmd[-2]}" ]]; then
-        local arg="${cmd[-2]}"
+    # Last argument must be the firmware file. This file should already exist
+    if [[ -f "${cmd[-1]}" ]]; then
+        local arg="${cmd[-1]}"
         local abspath=$(realpath "$arg")
         local host_path=$(dirname "$abspath")
         local guest_path="/host_$(basename "$host_path")"
         maps+=("$host_path:$guest_path")
-        #cmd[-2]="/host_$(basename "$host_path")/$(basename "$arg")"
         firmware_file="/host_$(basename "$host_path")/$(basename "$arg")"
     else
-        echo "Fatal error: Firmware file not found: ${cmd[-2]}"
+        echo "Fatal error: Firmware file not found: ${cmd[-1]}"
     fi
 
-    # Final argument should be the output directory path. XXX now a filename
-    output_dir="${cmd[-1]}"
-
-    if [ -e "$output_dir" ]; then
-        if $force; then
-            echo "Removing existing output file: $output_dir"
-            rm -f "$output_dir"
-        else
-            echo "Error: Output file already exists: $output_dir"
-            echo "Re-run with --force to remove it or delete it yourself first."
-            exit 1
+    # If we have an output
+    if [[ ! -z "$output" ]]; then
+        # If it's a directory, we'll rename it to <input basename>.tar.gz in the directory
+        if [[ -d "$output" ]]; then
+            output="$output/$(basename "$firmware_file").rootfs.tar.gz"
         fi
+
+        # Now it should be a file. If it exists, delete if force
+        if [[ -e "$output" ]]; then
+            if ! $force; then
+                echo "Error: Output file already exists: $output"
+                echo "Re-run with --force to remove it or delete it yourself first."
+                exit 1
+            fi
+            if $force; then
+                echo "Removing output file: $output"
+                rm -f "$output"
+            fi
+        fi
+
+        # If directory doesn't exist, create it
+        mkdir -p "$(dirname "$output")"
+        local abspath=$(realpath $(dirname "$output"))
+        local guest_path="/output"
+        maps+=("$abspath:$guest_path")
+
+        # Replace output with /output/<basename $output>
+        # so it's valid in the container
+        output="/output/$(basename "$output")"
     fi
-
-    local arg="${cmd[-1]}"
-    local abspath=$(realpath "$arg")
-    local host_path=$(dirname "$abspath")
-    local guest_path="/host_$(basename "$host_path")"
-    maps+=("$host_path:$guest_path")
-    #cmd[-1]="/host_$(basename "$host_path")/$(basename "$arg")"
-    output_dir="/host_$(basename "$host_path")/$(basename "$arg")"
-
 
     # If we have a partition_dir
     if [[ ! -z "$partition_dir" ]]; then
@@ -227,20 +240,25 @@ fw2tar_run() {
 
 
     docker_cmd+=("$image")
-    #docker_cmd+=("fakeroot_fw2tar")
+
+    local friendly_cmd="fakeroot /usr/local/bin/package_partitions.sh ${firmware_file}"
     docker_cmd+=("fakeroot" "/usr/local/bin/package_partitions.sh")
     docker_cmd+=("${firmware_file}")
-    docker_cmd+=("${output_dir}")
+
+    if [[ ! -z "$output" ]]; then
+        docker_cmd+=("${output}")
+        friendly_cmd+=" ${output}"
+    fi
 
     # If we have partition_dir non-empty, add /partition_dir as final arg
     if [[ ! -z "$partition_dir" ]]; then
         docker_cmd+=("/partition_dir")
+        friendly_cmd+=" /partition_dir"
     fi
 
     if $verbose; then
         echo "${BOLD}Fw2tar command:${RESET}"
-        #echo "  fw2tar ${cmd[@]}"
-        echo "  fakeroot /usr/local/bin/package_partitions.sh ${cmd[@]}"
+        echo "  ${friendly_cmd}"
         echo
 
         echo "${BOLD}Complete docker commands:${RESET}"
