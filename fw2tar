@@ -172,10 +172,8 @@ fw2tar_run() {
 
     # If we have a scratch dir set - make sure it exists and empty it
     if [[ ! -z "$partition_dir" ]]; then
-        echo "Scratch directory set: $partition_dir"
         # If it's already here, make sure it's empty
         if [[ -e "$partition_dir" ]]; then
-            echo "Scratch directory exists force is $force"
             if ! $force; then
                 echo "Error: Scratch directory is not empty: $partition_dir"
                 echo "Re-run with --force to remove it or delete it yourself first."
