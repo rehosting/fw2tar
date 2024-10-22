@@ -29,6 +29,11 @@ rm ${log_scratch}
 # Delete all .uncompressed, .unknown, *.padding, and carved.elf files
 find "$extract_dir" -type f \( -name '*.uncompressed' -o -name '*.unknown' -o -name '*.padding' -o -name 'carved.elf' \) -delete
 
+# Delete extractions we don't like: *.jar_extract (jar files)
+find "$extract_dir" -type d \( -name '*.jar_extract' \) -exec rm -rf {} +
+# Delete extracted debian packages
+#find "$extract_dir" -type f -name 'debian-binary' -execdir sh -c 'test -f control.tar.xz -o -f control.tar.gz -o -f control.tar.bz2' \; -print -execdir rm -rf .. \;
+
 # Find and delete debian packages - look for files named `debian_binary` that are in a directory named *_extract
 # Also search for 'control' files that have a 'Package:' line and delete their parent directory
 find "$extract_dir" -type f -name 'debian-binary' | while read -r debian_binary; do
