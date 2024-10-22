@@ -133,6 +133,7 @@ fw2tar_run() {
                 -v $(pwd):/output \
                 --privileged -t \
                 --rm quay.io/singularity/docker2singularity:v3.9.0 rehosting/fw2tar
+            rm -f fw2tar.sif
             mv rehosting_fw2tar*.sif fw2tar.sif
 
             echo "$image built. Exiting."
