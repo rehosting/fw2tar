@@ -8,15 +8,13 @@ set -eu
 
 firmware="$1"
 output="$2"
-# third argument is optional
-tmpbase=${3:-$(mktemp -d)}
-mkdir -p "$tmpbase"
-chmod 777 "$tmpbase"
+# third argument is optional partition_dir
+partition_dir=${3:-}
 
-hashed_partitions_dir=$(mktemp -d -p "$tmpbase")
+hashed_partitions_dir=$(mktemp -d)
+extract_dir=$(mktemp -d) # If user specified a partition_dir, we'll move files from here later
 
 # Stage 1: Run unblob on the provided firmware
-extract_dir=$(mktemp -d -p "$tmpbase")
 log_scratch=$(mktemp) # Can't write unblob.log into /
 unblob -k "$firmware" -e "$extract_dir" --log "${log_scratch}"
 rm ${log_scratch}
@@ -75,8 +73,19 @@ while read -r size file; do
     echo "Packaged $new_filename (size: $size, nfiles: $nfiles)"
 done < <(find "$hashed_partitions_dir" -type f -name "*.tar.gz" -print0 | xargs -0 du -s | sort -rn)
 
-# Don't create root-owned files that end users can't delete in mapped directories
-chmod 777 "${hashed_partitions_dir}/"*
+# If we have a partition dir, move the files there
+if [ -n "$partition_dir" ]; then
+    mv "$hashed_partitions_dir"/* "$partition_dir"
+    hashed_partitions_dir="$partition_dir"
+fi
 
 # Now call unify
-python3 -m unifyroot.cli "$hashed_partitions_dir" "$output" "$extract_dir" "$tmpbase"
+python3 -m unifyroot.cli "$hashed_partitions_dir" "$output" "$extract_dir"
+
+# Always delete extract dir
+rm -rf "$extract_dir"
+
+# Delete partition dir if user didn't speciify one
+if [ ! -n "$partition_dir" ]; then
+    rm -rf "$hashed_partitions_dir"
+fi

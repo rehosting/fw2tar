@@ -25,6 +25,7 @@ fw2tar_run() {
     local image="rehosting/fw2tar" # Name of container instance
     local partition_dir=""
     local force=false
+    local scratch_dir=""
 
     # Process each command-line argument
     while [[ $# -gt 0 ]]; do
@@ -37,6 +38,7 @@ fw2tar_run() {
                 echo "  --build: Build the fw2tar container before running the specified command. If no other arguments are provided, the container will be built and the script will exit."
                 echo "  --build-singularity: Build the fw2tar container as a sif."
                 echo "  --force: Remove existing output file and scratch directory if they exists."
+                echo "  --scratch_dir: Specify a directory to use as a scratch directory"
                 echo "  --partition_dir: Specify a directory to produce partition archives into. The directory will be deleted if --force is set."
                 echo "  --image: Which image to run. Default: $image"
                 echo "  --verbose: Print verbose output for fw2tar wrapper (e.g., filesystem mappings, docker command)"
@@ -59,6 +61,10 @@ fw2tar_run() {
                 ;;
             --partition_dir)
                 partition_dir="$2"
+                shift 2
+                ;;
+            --scratch_dir)
+                scratch_dir="$2"
                 shift 2
                 ;;
             --force)
@@ -170,23 +176,31 @@ fw2tar_run() {
     output_dir="/host_$(basename "$host_path")/$(basename "$arg")"
 
 
-    # If we have a scratch dir set - make sure it exists and empty it
+    # If we have a partition_dir
     if [[ ! -z "$partition_dir" ]]; then
         # If it's already here, make sure it's empty
         if [[ -e "$partition_dir" ]]; then
             if ! $force; then
-                echo "Error: Scratch directory is not empty: $partition_dir"
+                echo "Error: Partition directory is not empty: $partition_dir"
                 echo "Re-run with --force to remove it or delete it yourself first."
                 exit 1
             fi
             if $force; then
-                echo "Removing scratch directory: $partition_dir"
+                echo "Removing partition directory: $partition_dir"
                 rm -rf "$partition_dir"
             fi
         fi
         mkdir -p "$partition_dir"
         local abspath=$(realpath "$partition_dir")
-        local guest_path="/scratch"
+        local guest_path="/partition_dir"
+        maps+=("$abspath:$guest_path")
+    fi
+
+    # If we have a scratch dir map it in as /tmp
+    if [[ ! -z "$scratch_dir" ]]; then
+        mkdir -p "$scratch_dir"
+        local abspath=$(realpath "$partition_dir")
+        local guest_path="/tmp"
         maps+=("$abspath:$guest_path")
     fi
 
@@ -218,9 +232,9 @@ fw2tar_run() {
     docker_cmd+=("${firmware_file}")
     docker_cmd+=("${output_dir}")
 
-    # If we have partition_dir non-empty, add /scratch as final arg
+    # If we have partition_dir non-empty, add /partition_dir as final arg
     if [[ ! -z "$partition_dir" ]]; then
-        docker_cmd+=("/scratch")
+        docker_cmd+=("/partition_dir")
     fi
 
     if $verbose; then
