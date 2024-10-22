@@ -20,6 +20,10 @@ def unify_filesystems(input_path: str, output_path: str):
     if output_path is None:
         output_path = input_path + "unified.tar.gz"
 
+    if len(mount_points) == 0:
+        print("No mount points found, not creating archive.")
+        return
+
     unifier.create_archive(loader.load_path, mount_points, output_path)
 
 def main():

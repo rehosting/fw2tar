@@ -441,7 +441,6 @@ class FilesystemUnifier:
     def create_archive(self, archive_dir, mounts, output, tmp_base=None):
         # Create a temporary directory, then extract filesystems from self.repository at the mount
         # points and package it up
-        #with tempfile.TemporaryDirectory() as temp_dir:
 
         # If tmp_base is None, we'll use a temporary directory in the system's default location
         # otherwise it's within the specified dir
