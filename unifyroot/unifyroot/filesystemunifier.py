@@ -125,7 +125,7 @@ class FilesystemUnifier:
         best_mount_point = None
         best_score_improvement = 0
         visible_paths = self._get_visible_paths(cur_mounts)
-        potential_mounts = self._find_potential_mount_points(cur_mounts, fs_info, unresolved_paths, symlinks)
+        potential_mounts = self._find_potential_mount_points(cur_mounts, fs_info, unresolved_paths, symlinks, visible_paths)
 
         for potential_mount_point in potential_mounts:
             resolved_paths = self._get_resolved_paths(visible_paths, potential_mount_point, fs_info, unresolved_paths)
@@ -138,19 +138,13 @@ class FilesystemUnifier:
 
             # XXX: We don't want to lose/shadow too many files. Specifically we probably don't want to lose files
             # from our root filesystem, but shadowing files is generally probably bad
-            lost_files = []
-            for _, files in visible_paths.items():
-                lost_files.extend([x for x in files if x.startswith(potential_mount_point)])
 
-            print(f"\t{cur_mounts} + {fs_info.name} @ {potential_mount_point} resolves {len(resolved_paths)} paths, adds {total_files_in_mount} files, loses {len(lost_files)} to get {len(total_files_with_mount)} total files")
+            print(f"\t{cur_mounts} + {fs_info.name} @ {potential_mount_point} resolves {len(resolved_paths)} paths, adds {total_files_in_mount} files to get {len(total_files_with_mount)} total files")
             print(f"\t\t {' '.join(resolved_paths[:10])}")
 
             # XXX: is our improvement just the number of resolved paths?
             # What if this mount just resolves like 1 path and adds a bunch of broken references? On the other hand, what if it's just 1 path and we're fixing it
-            if len(lost_files) > 5:
-                # Probably bad, we don't want to shadow too many files
-                score_improvement = 0
-            elif len(resolved_paths) > 2:
+            if len(resolved_paths) > 2:
                 # If we resolve more than 2 paths, we're probably doing well
                 score_improvement = len(resolved_paths)
             elif len(resolved_paths) == 0:
@@ -248,7 +242,21 @@ class FilesystemUnifier:
             return path[len(mount_point):].lstrip('/')
         return path
 
-    def _find_potential_mount_points(self, cur_mounts: Dict[str, str], fs_info: FilesystemInfo, unresolved_paths: Set[str], symlinks: Dict[str, str]) -> List[str]:
+    def _count_shadowed(self, potential_mount_point: str,
+                        visible_paths: Dict[str, Set[str]]) -> int:
+        '''
+        If we mounted another filesystem at potential_mount_point, how many unique files would be shadowed (lost)?
+        '''
+        lost_files = []
+        for _, files in visible_paths.items():
+            lost_files.extend([x for x in files if x.startswith(potential_mount_point)])
+        return len(set(lost_files))
+
+    def _find_potential_mount_points(self, cur_mounts: Dict[str, str],
+                                     fs_info: FilesystemInfo,
+                                     unresolved_paths: Set[str],
+                                     symlinks: Dict[str, str],
+                                     visible_paths: Dict[str, Set[str]]) -> List[str]:
         """
         Finds potential mount points for a filesystem based on unresolved paths.
 
@@ -273,8 +281,15 @@ class FilesystemUnifier:
 
                     if self._is_unlikely_mount(potential_mount_point):
                         continue
-                    if self._is_valid_new_mount_point(potential_mount_point, cur_mounts):
-                        mount_point_candidates[potential_mount_point].add(unresolved_path)
+                    if not self._is_valid_new_mount_point(potential_mount_point, cur_mounts):
+                        continue
+
+                    if self._count_shadowed(potential_mount_point, visible_paths) > 5:
+                        # Hyperparameter: don't shadow too many files. Is 5 a good threshold?
+                        # Too many files are shadowed by this mount point
+                        continue
+
+                    mount_point_candidates[potential_mount_point].add(unresolved_path)
 
         # Step 2: Evaluate each potential mount point
         potential_mount_points: Dict[str, int] = {}
