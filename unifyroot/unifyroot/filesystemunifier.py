@@ -473,6 +473,7 @@ class FilesystemUnifier:
         for part in dest.split("/"):
             this_path = os.path.join(*[base_dir, safe_path, part])
             #print(f"Testing: {base_dir} / {safe_path} / {part}")
+            old_path = safe_path
             if os.path.islink(this_path):
                 # We need to resolve the base_dir/safe_path/part is a symlink, we need to resolve it,
                 # then make it relative to base_dir
@@ -486,6 +487,8 @@ class FilesystemUnifier:
                     # Relative symlink, append it to the current path
                     safe_path = os.path.join(safe_path, link_dest)
                     #print("\tRelative symlink, new path is", safe_path)
+                if old_path == safe_path:
+                    raise ValueError("Symlink loop detected") # TODO - something?
                 # XXX: what about ../ in the symlink? We should probably resolve it?
             else:
                 safe_path = os.path.join(safe_path, part)
