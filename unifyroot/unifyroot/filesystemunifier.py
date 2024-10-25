@@ -275,9 +275,13 @@ class FilesystemUnifier:
             for fs_path in fs_info.paths:
                 potential_mount_point = self._get_potential_mount_point(unresolved_path, fs_path)
                 if potential_mount_point and potential_mount_point != '.':
+                    old = potential_mount_point
                     while potential_mount_point in symlinks:
                         # "resolve" symlink
                         potential_mount_point = symlinks[potential_mount_point]
+                    if old != potential_mount_point:
+                        assert(unresolved_path.startswith(old)), f"Unresolved path {unresolved_path} doesn't start with {old}"
+                        unresolved_path = potential_mount_point + unresolved_path[len(old):]
 
                     if self._is_unlikely_mount(potential_mount_point):
                         continue
@@ -438,6 +442,44 @@ class FilesystemUnifier:
 
         return visible_paths
 
+    def _resolve_symlinks(self, dest: str, base_dir: str) -> str:
+        '''
+        Given an absolute path like /tmp/extraction/usr/opt/bin with base_dir of /tmp/extraction,
+        walk through and replace symlinks but ensure we stay within base_dir.
+        '''
+        if dest.startswith(base_dir):
+            dest = dest[len(base_dir):]
+
+        if dest.startswith("/"):
+            dest = dest[1:]
+
+        # Dest is relative to base_dir now.
+        # Iteratively build up full_dest (relative to base_dir), replacing symlinks as we go
+
+        safe_path = ""
+        for part in dest.split("/"):
+            this_path = os.path.join(*[base_dir, safe_path, part])
+            print(f"Testing: {base_dir} / {safe_path} / {part}")
+            if os.path.islink(this_path):
+                # We need to resolve the base_dir/safe_path/part is a symlink, we need to resolve it,
+                # then make it relative to base_dir
+                link_dest = os.readlink(this_path)
+                #print("\tLink from",this_path, "to", link_dest)
+                if link_dest.startswith("/"):
+                    # Absolute symlink, just drop the leading slash since it will be relative
+                    safe_path = link_dest[1:]
+                    #print("\tAbsolute symlink, new path is", safe_path)
+                else:
+                    # Relative symlink, append it to the current path
+                    safe_path = os.path.join(safe_path, link_dest)
+                    #print("\tRelative symlink, new path is", safe_path)
+                # XXX: what about ../ in the symlink? We should probably resolve it?
+            else:
+                safe_path = os.path.join(safe_path, part)
+
+        assert(not(safe_path.startswith("/")))
+        return os.path.join(base_dir, safe_path)
+
     def create_archive(self, archive_dir, mounts, output, tmp_base=None):
         # Create a temporary directory, then extract filesystems from self.repository at the mount
         # points and package it up
@@ -454,6 +496,10 @@ class FilesystemUnifier:
                 # Ensure dest is within temp_dir
                 if not os.path.commonpath([temp_dir, dest]) == temp_dir:
                     raise ValueError(f"Destination {dest} is not within {temp_dir}")
+
+                # Resolve symlinks _before_ we create the archive, i.e.,
+                # if /opt -> /tmp/opt and we (foolishly) said we wanted to mount this fs at /opt,
+                dest = self._resolve_symlinks(dest, temp_dir)
 
                 # Create the directory if it doesn't exist
                 os.makedirs(dest, exist_ok=True)
