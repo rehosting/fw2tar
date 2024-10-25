@@ -27,12 +27,13 @@ fw2tar_run() {
     local force=false
     local scratch_dir=""
     local output=""
+    local fw=""
 
     # Process each command-line argument
     while [[ $# -gt 0 ]]; do
         case "$1" in
             --wrapper-help)
-                echo "Usage: fw2tar [WRAPPER FLAGS] [FLAGS] [FIRMWARE_BLOB] [FINAL_ARCHIVE.tar.gz]"
+                echo "Usage: fw2tar [WRAPPER FLAGS] [FLAGS] [FIRMWARE_BLOB]"
                 echo "Wrapper script for running FW2TAR in a Docker container"
                 echo ""
                 echo "Wrapper-specific flags may be passed in *before* the fw2tar flags and args. If a value is required, it must be specified immediately after the flag with a space."
@@ -49,7 +50,9 @@ fw2tar_run() {
                 echo "All other arguments will be passed through to the main fw2tar command in the container."
                 echo "For example try:"
                 echo "  fw2tar --help"
-                echo "  fw2tar ./your_firmware.bin"
+                echo "  fw2tar ./fws/your_firmware.bin"
+                echo "  fw2tar --partition_dir partitions/your_firmware ./fws/your_firmware.bin"
+                echo "  fw2tar --partition_dir partitions/your_firmware --output unified/your_firmware.tar.gz ./fws/your_firmware.bin"
                 exit 0
                 ;;
             --build)
@@ -85,17 +88,21 @@ fw2tar_run() {
                 verbose=true
                 shift
                 ;;
-            *)  # Default case: If no more known options, keep as part of command
-                cmd=("$@")
+            *)
+                # Default case: If no more known options, keep as part of command
+                fw="$1"
+                shift
+                # If there are any more args, it's an error
+                if [[ $# -gt 0 ]]; then
+                    echo "Error: Unknown argument: $1. Parsed $fw as firmware file."
+                    exit 1
+                fi
                 break
                 ;;
         esac
     done
 
     # If command is empty, parse any un-shifted args into array - probably means we were run with wrapper flags only (i.e., --build)
-    if [[ ${#cmd[@]} -eq 0 ]]; then
-        cmd=("$@")
-    fi
 
     # If verbose, log all wrapper args and command
     if $verbose; then
@@ -103,7 +110,7 @@ fw2tar_run() {
         echo "  build: $build"
         echo "  image: $image"
         echo "  verbose: $verbose"
-        echo "  fw2tar cmd: ${cmd[*]}"
+        echo "  fw: $fw"
         echo
     fi
 
@@ -140,23 +147,21 @@ fw2tar_run() {
             exit 0
         fi
 
-        # If we have no other args, exit 0
-        if [[ ${#cmd[@]} -eq 0 ]]; then
-            echo "$image built. Exiting as no command was specified."
+        if [[ -z "$fw" ]]; then
+            echo "$image built. Exiting as no firmware file was specified."
             exit 0
         fi
     fi
 
     # Last argument must be the firmware file. This file should already exist
-    if [[ -f "${cmd[-1]}" ]]; then
-        local arg="${cmd[-1]}"
-        local abspath=$(realpath "$arg")
+    if [[ -f "${fw}" ]]; then
+        local abspath=$(realpath "$fw")
         local host_path=$(dirname "$abspath")
         local guest_path="/host_$(basename "$host_path")"
         maps+=("$host_path:$guest_path")
-        firmware_file="/host_$(basename "$host_path")/$(basename "$arg")"
+        firmware_file="/host_$(basename "$host_path")/$(basename "$fw")"
     else
-        echo "Fatal error: Firmware file not found: ${cmd[-1]}"
+        echo "Fatal error: Firmware file not found: ${fw}"
     fi
 
     # If we have an output
@@ -178,7 +183,12 @@ fw2tar_run() {
                 rm -f "$output"
             fi
         fi
+    else
+        # No output specified, so we'll use the firmware file's directory
+        output=$(basename "$firmware_file").rootfs.tar.gz
+    fi
 
+    if [[ ! -z "$output" ]]; then
         # If directory doesn't exist, create it
         mkdir -p "$(dirname "$output")"
         local abspath=$(realpath $(dirname "$output"))
@@ -213,7 +223,7 @@ fw2tar_run() {
     # If we have a scratch dir map it in as /tmp
     if [[ ! -z "$scratch_dir" ]]; then
         mkdir -p "$scratch_dir"
-        local abspath=$(realpath "$partition_dir")
+        local abspath=$(realpath "$scratch_dir")
         local guest_path="/tmp"
         maps+=("$abspath:$guest_path")
     fi
