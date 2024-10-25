@@ -29,9 +29,16 @@ class FilesystemUnifier:
 
         # Try each filesystem as a potential root - with each consider how we could mount
         # others
+        potential_roots = [] # (root_fs_name, num_files)
         for root_fs_name, root_fs_info in self.repository.get_all_filesystems().items():
             if not self._could_be_root(root_fs_info):
                 continue
+            potential_roots.append((root_fs_name, len(root_fs_info.paths)))
+
+        # Now, for each potential root from largest to smallest, try to unify
+        # It's important we go from biggest to smallest because in the case of ties
+        # the bigger root is more likely to be right
+        for root_fs_name, _ in sorted(potential_roots, key=lambda x: x[1], reverse=True):
             initial = {"./": root_fs_name}
             mount_points, score = self._try_unify_from(initial)
             if score > best_score:
@@ -71,7 +78,8 @@ class FilesystemUnifier:
 
         best_score = self._calculate_configuration_score(mount_points, unresolved_paths)
 
-        print(f"{mount_points} has score {best_score}. Trying to improve with more filesystems...")
+        mount_points_s = " & ".join(f"{k} -> {v.replace('.tar.gz','')}" for k,v in mount_points.items())
+        print(f"{mount_points_s} has score {best_score}. Trying to improve with more filesystems...")
 
         # Collect symlinks that exist within the mount points we've defined
         # We *should not* add a filesystem at a symlink, that wouldn't really make sense
@@ -139,8 +147,13 @@ class FilesystemUnifier:
             # XXX: We don't want to lose/shadow too many files. Specifically we probably don't want to lose files
             # from our root filesystem, but shadowing files is generally probably bad
 
-            print(f"\t{cur_mounts} + {fs_info.name} @ {potential_mount_point} resolves {len(resolved_paths)} paths, adds {total_files_in_mount} files to get {len(total_files_with_mount)} total files")
-            print(f"\t\t {' '.join(resolved_paths[:10])}")
+            cur_mounts_s = " & ".join(f"{k} -> {v.replace('.tar.gz','')}" for k,v in cur_mounts.items())
+            print(f"\t{cur_mounts_s} + {fs_info.name} @ {potential_mount_point}")
+            #print(f"\t\tResolves {len(resolved_paths)} paths")
+            #print(f"\t\tAdds {total_files_in_mount} files")
+            #print(f"\t\tTotal of {len(total_files_with_mount)}")
+            #print(f"\t\tResolved: {len(resolved_paths)}")
+            #print(f"\t\tUnresolved: {len(unresolved_paths)}")
 
             # XXX: is our improvement just the number of resolved paths?
             # What if this mount just resolves like 1 path and adds a bunch of broken references? On the other hand, what if it's just 1 path and we're fixing it
