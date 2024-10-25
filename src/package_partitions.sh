@@ -55,6 +55,8 @@ find $extract_dir -type d \( -name "*_carve" -o -name "*_extract" \) | while rea
     # Create the archive, excluding subdirectories ending with '_carve' '_extract' or '_uncompressed'
     # Also filter out ###-####.[ext] files, which are almost always unblob artifacts (e.g., 0-100.lzma)
     tar -czf "$temp_archive" \
+        --sort=name \
+        --mtime="UTC 2019-01-01" \
         --exclude='*_carve' --exclude='*_extract' --exclude '*.uncompressed' \
         --exclude='[0-9]*-[0-9]*.*' \
         -C "$dir" .
