@@ -493,6 +493,35 @@ class FilesystemUnifier:
         assert(not(safe_path.startswith("/")))
         return os.path.join(base_dir, safe_path)
 
+    @staticmethod
+    def get_device_files(archive_path):
+        # List all files in the tar archive and identify device files
+        device_files = []
+        tar_list = subprocess.check_output(["tar", "tvf", archive_path]).decode("utf-8").splitlines()
+        for entry in tar_list:
+            # Device files typically have 'b' or 'c' as the first character in permissions
+            if entry.startswith(('b', 'c')):
+                # Extract the file path
+                file_path = entry.split()[-1]
+                device_files.append(file_path)
+        return device_files
+
+    @staticmethod
+    def extract_tar(src, dest, exclude=None):
+
+        if not exclude:
+            exclude_args = []
+        else:
+            exclude_args = ["--exclude=" + x for x in exclude]
+
+        # Run tar extraction with exclusion of device files
+        tar_command = ["tar", "xf", src, "-C", dest,
+                    "--keep-directory-symlink",
+                    "--skip-old-files",
+                    ] + exclude_args
+
+        subprocess.check_output(tar_command)
+
     def create_archive(self, archive_dir, mounts, output, tmp_base=None):
         # Create a temporary directory, then extract filesystems from self.repository at the mount
         # points and package it up
@@ -521,11 +550,16 @@ class FilesystemUnifier:
                 # Create the directory if it doesn't exist
                 os.makedirs(dest, exist_ok=True)
 
-                # Extract
-                subprocess.check_output(["tar", "xf", src, "-C", dest,
-                                          "--keep-directory-symlink", #???
-                                          "--skip-old-files",
-                                          ])
+                # Extract. If non-root we have to filter out devices
+                # to avoid an error with tar trying to mknod
+                if os.getuid() != 0:
+                    device_files = FilesystemUnifier.get_device_files(src)
+                    if len(device_files) > 0:
+                        print(f"Warning: Not running as (fake)root, dropping {len(device_files)} device files from {fs_info.name}")
+                        print("THIS IS BAD YOU SHOULD RERUN WITH FAKEROOT")
+                    self.extract_tar(src, dest, exclude=device_files)
+                else:
+                    self.extract_tar(src, dest)
 
             # Log the best mount points into a file
             with open(os.path.join(temp_dir, ".mounts.csv"), "w") as f:
