@@ -459,7 +459,7 @@ class FilesystemUnifier:
         safe_path = ""
         for part in dest.split("/"):
             this_path = os.path.join(*[base_dir, safe_path, part])
-            print(f"Testing: {base_dir} / {safe_path} / {part}")
+            #print(f"Testing: {base_dir} / {safe_path} / {part}")
             if os.path.islink(this_path):
                 # We need to resolve the base_dir/safe_path/part is a symlink, we need to resolve it,
                 # then make it relative to base_dir
@@ -501,11 +501,18 @@ class FilesystemUnifier:
                 # if /opt -> /tmp/opt and we (foolishly) said we wanted to mount this fs at /opt,
                 dest = self._resolve_symlinks(dest, temp_dir)
 
+                # Ensure it's _still_ within temp_dir
+                if not os.path.commonpath([temp_dir, dest]) == temp_dir:
+                    raise ValueError(f"Destination {dest} is not within {temp_dir}")
+
                 # Create the directory if it doesn't exist
                 os.makedirs(dest, exist_ok=True)
 
                 # Extract
-                subprocess.check_output(["tar", "xf", src, "-C", dest])
+                subprocess.check_output(["tar", "xf", src, "-C", dest,
+                                          "--keep-directory-symlink", #???
+                                          "--skip-old-files",
+                                          ])
 
             # Log the best mount points into a file
             with open(os.path.join(temp_dir, ".mounts.csv"), "w") as f:
@@ -514,4 +521,8 @@ class FilesystemUnifier:
                     f.write(f"{archive},{mount_point}\n")
 
             # All done - package it up
-            subprocess.check_output(["tar", "czf", output, "-C", temp_dir, "."])
+            subprocess.check_output(["tar",
+                                     "--sort=name",
+                                     "--mtime=UTC 2019-01-01",
+                                     "-czf", output,
+                                     "-C", temp_dir, "."])
