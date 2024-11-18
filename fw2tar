@@ -189,6 +189,9 @@ fw2tar_run() {
         docker_cmd+=("-v" "$map")
     done
 
+    # Add env variable of penguin bash script hash
+    hash=$(sha1sum "$0" | awk '{print $1}')
+    docker_cmd+=("-e" "FW2TAR_HASH=$hash")
 
     docker_cmd+=("$image")
     docker_cmd+=("fakeroot_fw2tar")
