@@ -7,7 +7,7 @@ echo "#!/bin/bash"
 echo "mkdir -p \$HOME/.local/bin"
 
 echo "cat << 'EOF' > ~/.local/bin/fw2tar"
-cat /usr/local/src/fw2tar_wrapper
+printf "%s" "$(cat /usr/local/src/fw2tar_wrapper)"
 echo
 echo "EOF"
 

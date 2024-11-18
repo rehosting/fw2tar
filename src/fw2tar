@@ -462,7 +462,7 @@ if __name__ == "__main__":
             'Reinstall global fw2tar from container with "docker run rehosting/fw2tar fw2tar_install | sudo sh"'
         )
         print(
-            'Reinstall local fw2tar from container with "docker run rehosting/fw2tar fw2tar_install.local | sudo sh"'
+            'Reinstall local fw2tar from container with "docker run rehosting/fw2tar fw2tar_install.local | sh"'
         )
         sys.exit(1)
 
