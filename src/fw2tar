@@ -450,7 +450,7 @@ if __name__ == "__main__":
 
     fw2tar_hash_env = os.getenv("FW2TAR_HASH")
     if fw2tar_hash_env is None:
-        logger.error("FW2TAR_HASH environment variable is not set.")
+        print("FW2TAR_HASH environment variable is not set.")
     fw2tar_file = "/usr/local/src/fw2tar_wrapper"
     fw2tar_hash = sha1sum_file(fw2tar_file)
 
@@ -464,7 +464,6 @@ if __name__ == "__main__":
         print(
             'Reinstall local fw2tar from container with "docker run rehosting/fw2tar fw2tar_install.local | sh"'
         )
-        sys.exit(1)
 
     parser = argparse.ArgumentParser(description="Process some files.")
     parser.add_argument("firmware", type=str, help="Input file")
