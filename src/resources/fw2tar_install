@@ -6,7 +6,7 @@
 echo "#!/bin/bash"
 
 echo "cat << 'EOF' | sudo tee /usr/local/bin/fw2tar >/dev/null"
-cat /usr/local/src/fw2tar_wrapper
+printf "%s" "$(cat /usr/local/src/fw2tar_wrapper)"
 
 echo
 echo "EOF"

@@ -448,6 +448,23 @@ if __name__ == "__main__":
         print("This script must be run as (fake)root")
         sys.exit(1)
 
+    fw2tar_hash_env = os.getenv("FW2TAR_HASH")
+    if fw2tar_hash_env is None:
+        print("FW2TAR_HASH environment variable is not set.")
+    fw2tar_file = "/usr/local/src/fw2tar_wrapper"
+    fw2tar_hash = sha1sum_file(fw2tar_file)
+
+    if fw2tar_hash != fw2tar_hash_env:
+        print(
+            "Current fw2tar file does not match /usr/local/src/fw2tar_wrapper."
+        )
+        print(
+            'Reinstall global fw2tar from container with "docker run rehosting/fw2tar fw2tar_install | sudo sh"'
+        )
+        print(
+            'Reinstall local fw2tar from container with "docker run rehosting/fw2tar fw2tar_install.local | sh"'
+        )
+
     parser = argparse.ArgumentParser(description="Process some files.")
     parser.add_argument("firmware", type=str, help="Input file")
     parser.add_argument("--scratch-dir", type=str, default="/tmp", help="Scratch directory (optional). Default /tmp")
