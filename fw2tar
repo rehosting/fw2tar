@@ -122,17 +122,17 @@ fw2tar_run() {
         fi
     fi
 
-    # Check if last argument is a file, if so we'll need to map it
-    if [[ ${#cmd[@]} -gt 0 ]]; then
-        if [[ -f "${cmd[-1]}" ]]; then
-            local arg="${cmd[-1]}"
-            local abspath=$(realpath "$arg")
-            local host_path=$(dirname "$abspath")
-            local guest_path="/host_$(basename "$host_path")"
-            maps+=("$host_path:$guest_path")
-            cmd[-1]="/host_$(basename "$host_path")/$(basename "$arg")"
-        fi
-    fi
+    # Check for firmware file and map it
+    for i in "${!cmd[@]}"; do
+	if [[ -f "${cmd[$i]}" ]] && [[ "${cmd[$((i - 1))]}" != "--output" ]] && [[ "${cmd[$((i - 1))]}" != "--scratch-dir" ]]; then
+	    local arg="${cmd[$i]}"
+	    local abspath=$(realpath "$arg")
+	    local host_path=$(dirname "$abspath")
+	    local guest_path="/host_$(basename "$host_path")"
+	    maps+=("$host_path:$guest_path")
+	    cmd[$i]="/host_$(basename "$host_path")/$(basename "$arg")"
+	fi
+    done
 
     # Check for "--output" flag, create and map the directory as necessary
     for ((i=0; i<${#cmd[@]}; i++)); do
