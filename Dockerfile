@@ -113,7 +113,9 @@ COPY ./src/resources/banner.sh ./src/resources/fw2tar_install ./src/resources/fw
 # Warn on interactive shell sessions and provide instructions for install
 RUN echo '[ ! -z "$TERM" ] && [ -z "$NOBANNER" ] && /usr/local/bin/banner.sh' >> /etc/bash.bashrc
 
-# fw2tar here is a simple shell wrapper to call fakeroot fw2tar.py
-COPY src/fw2tar src/fakeroot_fw2tar /usr/local/bin/
+COPY src/fw2tar /usr/local/bin/
+
+# Symlink for backwards compatibility
+RUN ln -s /usr/local/bin/fw2tar /usr/local/bin/fakeroot_fw2tar
 
 CMD ["/usr/local/bin/banner.sh"]
