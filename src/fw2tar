@@ -445,8 +445,15 @@ def main(infile, outfile_base, scratch_dir="/tmp", extractors=None, verbose=Fals
 if __name__ == "__main__":
     os.umask(0o000)
     if os.geteuid() != 0:
-        print("This script must be run as (fake)root")
-        sys.exit(1)
+        fakeroot_path = shutil.which("fakeroot")
+
+        # if fakeroot can't be found, we leave this to the user
+        if fakeroot_path is None:
+            print("This script must be run as (fake)root")
+            sys.exit(1)
+
+        # Replace current process with fakeroot rerun of the same process
+        os.execv(fakeroot_path, ["fakeroot"] + sys.argv)
 
     fw2tar_hash_env = os.getenv("FW2TAR_HASH")
 
