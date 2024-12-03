@@ -455,6 +455,10 @@ if __name__ == "__main__":
         # Replace current process with fakeroot rerun of the same process
         os.execv(fakeroot_path, ["fakeroot"] + sys.argv)
 
+        # Handle execv failing to replace process
+        print("Failed to run fakeroot")
+        sys.exit(1)
+
     fw2tar_hash_env = os.getenv("FW2TAR_HASH")
 
     # if the environment variable isn't set we don't need to tell the user to reinstall,
