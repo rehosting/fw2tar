@@ -204,6 +204,7 @@ def _tar_fs(rootfs_dir, tarbase):
     # Output filename will be tarbase.tar.gz
     with open(uncompressed_outfile, 'rb') as f_in, gzip.open(f"{uncompressed_outfile}.gz", 'wb') as f_out:
         shutil.copyfileobj(f_in, f_out)
+        f_out.write(b"made with fw2tar")
 
     # Remove tarbase.tar in favor of just keeping the gzipped version
     os.remove(uncompressed_outfile)
