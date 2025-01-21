@@ -10,6 +10,7 @@ import time
 import hashlib
 import gzip
 import shutil
+import json
 from collections import defaultdict
 from multiprocessing import Process, Lock, Manager
 from pathlib import Path
@@ -159,7 +160,7 @@ def find_devices_in_dir(directory):
                 pass  # Skip files we can't access
     return devices
 
-def _tar_fs(rootfs_dir, tarbase):
+def _tar_fs(rootfs_dir, tarbase, metadata):
     # First, define the name of the uncompressed tar archive (temporary name)
     uncompressed_outfile = f"{tarbase}.tar"
 
@@ -204,6 +205,12 @@ def _tar_fs(rootfs_dir, tarbase):
     # Output filename will be tarbase.tar.gz
     with open(uncompressed_outfile, 'rb') as f_in, gzip.open(f"{uncompressed_outfile}.gz", 'wb') as f_out:
         shutil.copyfileobj(f_in, f_out)
+
+        json_metadata = (json.dumps(metadata) + "\n").encode()
+
+        # Add padding to ensure footer is null prefixed
+        f_out.write(b'\0' * (0x10 - (len(json_metadata) % 0x10)))
+        f_out.write(json_metadata)
         f_out.write(b"made with fw2tar")
 
     # Remove tarbase.tar in favor of just keeping the gzipped version
@@ -257,7 +264,7 @@ def sha1sum_file(filename):
     return sha1.hexdigest()
 
 def extract_and_process(extractor, infile, outfile_base, scratch_dir, start_time, verbose, primary_limit,
-                        secondary_limit, results, results_lock):
+                        secondary_limit, results, results_lock, metadata):
     with tempfile.TemporaryDirectory(dir=scratch_dir) as extract_dir:
         log_file = f"{outfile_base}.{extractor}.log"
         # Running the appropriate extractor
@@ -279,7 +286,7 @@ def extract_and_process(extractor, infile, outfile_base, scratch_dir, start_time
             tarbase = f"{outfile_base}.{extractor}.{idx}"
             if verbose:
                 print(f"Archiving {root} as {tarbase}.tar.gz")
-            _tar_fs(root, tarbase)
+            _tar_fs(root, tarbase, metadata)
 
             # XXX: can be replaced by hashlib.file_digest in python >= 3.11
             archive_hash = sha1sum_file(f"{tarbase}.tar.gz")
@@ -297,7 +304,7 @@ def extract_and_process(extractor, infile, outfile_base, scratch_dir, start_time
                 if idx >= secondary_limit:
                     break
                 tarbase = f"{outfile_base}.{extractor}.nonroot.{idx}"
-                _tar_fs(root, tarbase)
+                _tar_fs(root, tarbase, metadata)
 
                 archive_hash = subprocess.run(["sha1sum", f"{tarbase}.tar.gz"], capture_output=True, text=True).stdout.split()[0]
                 with results_lock:
@@ -330,13 +337,22 @@ def main(infile, outfile_base, scratch_dir="/tmp", extractors=None, verbose=Fals
     results_lock = Lock()
     start_time = time.time()
 
+    input_hash = sha1sum_file(infile)
+
+    # XXX: Reproducibility issue: filename/command won't match across environments
+    metadata = {
+        "input_hash": input_hash,
+        "file": os.path.basename(infile),
+        "fw2tar_command": sys.argv,
+    }
+
     for extractor in extractors:
         if verbose:
             print(f"Starting {extractor} extraction...")
         p = Process(target=extract_and_process, args=(extractor, infile, outfile_base,
                                                       scratch_dir, start_time, verbose,
                                                       primary_limit, secondary_limit,
-                                                      results, results_lock))
+                                                      results, results_lock, metadata))
         p.name = f"{extractor} extraction"
         processes.append(p)
         p.start()
