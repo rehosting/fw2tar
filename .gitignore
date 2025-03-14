@@ -2,3 +2,8 @@
 *.sif
 *.tar.gz
 *.new
+
+
+# Added by cargo
+
+/target
