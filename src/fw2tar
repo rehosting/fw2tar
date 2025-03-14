@@ -18,7 +18,7 @@ import multiprocessing
 
 multiprocessing.set_start_method("fork")
 
-EXTRACTORS=["unblob", "binwalk"]
+EXTRACTORS=["unblob", "binwalk", "binwalkv3"]
 
 BAD_SUFFIXES = ['_extract', '.uncompressed', '.unknown', # Filename suffixes that show up as extraction artifacts
                 'cpio-root', 'squashfs-root', '0.tar'] # squashfs-root-* is special cased below
@@ -247,6 +247,15 @@ def _extract(extractor, infile, extract_dir, log_file):
 
                 signature=True
             )
+        elif extractor == "binwalkv3":
+            subprocess.run([
+                "binwalk",
+                "-eM",
+                "--log", log_file,
+                "-q",
+                infile,
+                "-C", str(extract_dir)
+            ])
         else:
             raise ValueError(f"Unknown extractor: {extractor}")
 
