@@ -15,6 +15,7 @@ RUN apt-get update && \
     build-essential \
     bzip2 \
     cabextract \
+    clang \
     cpio \
     cramfsswap \
     curl \
@@ -26,8 +27,12 @@ RUN apt-get update && \
     gzip \
     lhasa \
     libarchive-dev \
+    libfontconfig1-dev \
     liblzma-dev \
     liblzo2-dev \
+    liblz4-dev \
+    libbz2-dev \
+    libssl-dev \
     libmagic1 \
     locales \
     lz4 \
@@ -44,9 +49,11 @@ RUN apt-get update && \
     squashfs-tools \
     srecord \
     tar \
-    unar \
+    unrar \
     unrar-free \
+    unyaffs\
     unzip \
+    wget \
     xz-utils \
     zlib1g-dev \
     zstd
@@ -77,6 +84,15 @@ RUN pip install --upgrade pip && \
     python3 -m pip install python-lzo==1.14 && \
     poetry config virtualenvs.create false
 
+RUN curl -L -o sasquatch_1.0.deb "https://github.com/onekey-sec/sasquatch/releases/download/sasquatch-v4.5.1-4/sasquatch_1.0_$(dpkg --print-architecture).deb" && \
+    dpkg -i sasquatch_1.0.deb && \
+    rm sasquatch_1.0.deb
+
+# Binwalk v3 dependencies
+RUN git clone --depth=1 https://github.com/ReFirmLabs/binwalk /binwalk && \
+    cd /binwalk/dependencies && \
+    sh -c ./ubuntu.sh
+
 # CramFS no longer in apt - needed by binwalk
 RUN git clone --depth=1 https://github.com/davidribyrne/cramfs.git /cramfs && \
    cd /cramfs && make && make install
@@ -84,6 +100,15 @@ RUN git clone --depth=1 https://github.com/davidribyrne/cramfs.git /cramfs && \
 # Clone unblob fork then install with poetry
 RUN git clone --depth=1 https://github.com/rehosting/unblob.git /unblob
 RUN cd /unblob && poetry install --only main
+
+# Install Rust
+RUN curl https://sh.rustup.rs -sSf | bash -s -- -y
+
+# Add .cargo/bin to PATH
+ENV PATH="/root/.cargo/bin:${PATH}"
+
+# Install binwalk v3
+RUN cargo install binwalk
 
 # Explicitly install unblob deps - mostly captured above, but some of the .debs get updated and installed via curl
 RUN sh -c /unblob/unblob/install-deps.sh
