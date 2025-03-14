@@ -2,9 +2,9 @@ use super::{ExtractError, Extractor};
 use std::path::Path;
 use std::process::Command;
 
-pub struct UnblobExtractor;
+pub struct BinwalkExtractor;
 
-impl Extractor for UnblobExtractor {
+impl Extractor for BinwalkExtractor {
     const NAME: &'static str = "binwalk";
 
     fn extract(
