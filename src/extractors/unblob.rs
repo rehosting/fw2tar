@@ -5,7 +5,9 @@ use std::process::Command;
 pub struct UnblobExtractor;
 
 impl Extractor for UnblobExtractor {
-    const NAME: &'static str = "unblob";
+    fn name(&self) -> &'static str {
+        "unblob"
+    }
 
     fn extract(
         &self,
@@ -22,6 +24,6 @@ impl Extractor for UnblobExtractor {
             .args(&["--entropy-depth", "1"])
             .output()?;
 
-        Self::cmd_output_to_result(output)
+        self.cmd_output_to_result(output)
     }
 }
