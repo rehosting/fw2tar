@@ -5,7 +5,9 @@ use std::process::Command;
 pub struct BinwalkExtractor;
 
 impl Extractor for BinwalkExtractor {
-    const NAME: &'static str = "binwalk";
+    fn name(&self) -> &'static str {
+        "binwalk"
+    }
 
     fn extract(
         &self,
@@ -24,6 +26,6 @@ impl Extractor for BinwalkExtractor {
             .arg(extract_dir)
             .output()?;
 
-        Self::cmd_output_to_result(output)
+        self.cmd_output_to_result(output)
     }
 }
