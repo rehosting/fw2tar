@@ -20,7 +20,9 @@ fn is_blk_or_chr(meta: fs::Metadata) -> bool {
     meta.is_file() && meta.permissions().mode() & IS_BLK_OR_CHR_MASK != 0
 }
 
-pub fn tar_fs(rootfs_dir: &Path, tar_path: &Path, fw2tar_metadata: &Metadata) -> io::Result<()> {
+pub fn tar_fs(rootfs_dir: &Path, tar_path: &Path, fw2tar_metadata: &Metadata) -> io::Result<usize> {
+    let mut tar_entry_count = 0;
+
     let should_add_to_tar = |entry: &DirEntry| {
         if entry.path() == rootfs_dir {
             return true;
@@ -95,6 +97,7 @@ pub fn tar_fs(rootfs_dir: &Path, tar_path: &Path, fw2tar_metadata: &Metadata) ->
         header.set_cksum();
 
         tar.append_data(&mut header, entry_path, Cursor::new(data))?;
+        tar_entry_count += 1;
     }
 
     tar.finish()?;
@@ -108,5 +111,5 @@ pub fn tar_fs(rootfs_dir: &Path, tar_path: &Path, fw2tar_metadata: &Metadata) ->
     encoder.write_all(&json_bytes)?;
     encoder.write_all(b"made with fw2tar")?;
 
-    Ok(())
+    Ok(tar_entry_count)
 }
