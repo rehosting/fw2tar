@@ -26,6 +26,9 @@ impl Extractor for BinwalkExtractor {
             .arg(extract_dir)
             .output()?;
 
+        println!("stdout:\n{}\n", String::from_utf8_lossy(&output.stdout));
+        println!("stderr:\n{}\n", String::from_utf8_lossy(&output.stderr));
+
         self.cmd_output_to_result(output)
     }
 }

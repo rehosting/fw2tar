@@ -113,7 +113,7 @@ pub fn extract_and_process(
     Ok(())
 }
 
-fn sha1_file(file: &Path) -> io::Result<String> {
+pub fn sha1_file(file: &Path) -> io::Result<String> {
     let bytes = std::fs::read(file)?;
 
     let mut hasher = Sha1::new();

@@ -1,10 +1,10 @@
 [package]
 name = "fw2tar"
-version = "0.1.0"
+version = "2.0.0"
 edition = "2021"
 
 [dependencies]
-clap = "4.5.32"
+clap = { version = "4.5.32", features = ["derive"] }
 flate2 = "1.1.0"
 libc = "0.2.171"
 log = "0.4.26"
