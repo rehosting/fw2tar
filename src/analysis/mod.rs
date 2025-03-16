@@ -1,4 +1,4 @@
-use std::path::Path;
+use std::path::{Path, PathBuf};
 use std::sync::Mutex;
 use std::time::Instant;
 use std::{env, io};
@@ -23,6 +23,8 @@ pub struct ExtractionResult {
     pub num_files: usize,
     pub primary: bool,
     pub archive_hash: String,
+    pub file_node_count: usize,
+    pub path: PathBuf,
 }
 
 #[derive(Error, Debug)]
@@ -95,7 +97,7 @@ pub fn extract_and_process(
         let tar_path = out_file_base.with_extension(format!("{extractor_name}.{i}.tar.gz"));
 
         // XXX: improve error handling here
-        tar_fs(&fs.path, &tar_path, metadata).unwrap();
+        let file_node_count = tar_fs(&fs.path, &tar_path, metadata).unwrap();
         let archive_hash = sha1_file(&tar_path).unwrap();
 
         results.lock().unwrap().push(ExtractionResult {
@@ -105,6 +107,8 @@ pub fn extract_and_process(
             num_files: fs.num_files,
             primary: true,
             archive_hash,
+            file_node_count,
+            path: tar_path,
         });
     }
 
