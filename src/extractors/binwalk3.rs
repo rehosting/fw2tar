@@ -27,6 +27,6 @@ impl Extractor for Binwalk3Extractor {
             .arg(extract_dir)
             .output()?;
 
-        self.cmd_output_to_result(output)
+        self.cmd_output_to_result(output, false)
     }
 }

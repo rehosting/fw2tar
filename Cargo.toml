@@ -15,6 +15,7 @@ sha1 = "0.10.6"
 tar = { git = "https://github.com/jamcleod/tar-rs" }
 tempfile = "3.19.0"
 thiserror = "2.0.12"
+wait-timeout = "0.2.1"
 walkdir = "2.5.0"
 
 [dev-dependencies]

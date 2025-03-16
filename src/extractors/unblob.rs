@@ -24,6 +24,6 @@ impl Extractor for UnblobExtractor {
             .args(&["--entropy-depth", "1"])
             .output()?;
 
-        self.cmd_output_to_result(output)
+        self.cmd_output_to_result(output, false)
     }
 }
