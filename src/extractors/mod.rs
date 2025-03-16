@@ -49,13 +49,15 @@ pub trait Extractor: Sync {
         log_file: &Path,
     ) -> Result<(), ExtractError>;
 
-    fn cmd_output_to_result(&self, output: Output) -> Result<(), ExtractError> {
+    fn cmd_output_to_result(&self, output: Output, timed_out: bool) -> Result<(), ExtractError> {
         if output.status.success() {
             Ok(())
         } else {
             if let Some(code) = output.status.code() {
                 log::error!("{} exited with error code {}", self.name(), code);
                 Err(ExtractError::Failed(code))
+            } else if timed_out {
+                Ok(())
             } else {
                 Err(ExtractError::Killed(output.status.signal()))
             }

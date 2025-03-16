@@ -1,6 +1,8 @@
 use super::{ExtractError, Extractor};
 use std::path::Path;
-use std::process::Command;
+use std::process::{Command, Stdio};
+use std::time::Duration;
+use wait_timeout::ChildExt;
 
 pub struct BinwalkExtractor;
 
@@ -15,7 +17,7 @@ impl Extractor for BinwalkExtractor {
         extract_dir: &Path,
         log_file: &Path,
     ) -> Result<(), ExtractError> {
-        let output = Command::new("python3")
+        let mut child = Command::new("python3")
             .args(&["-m", "binwalk"])
             .args(&["--run-as=root", "--preserve-symlinks", "-eM"])
             .arg("--log")
@@ -24,11 +26,21 @@ impl Extractor for BinwalkExtractor {
             .arg(in_file)
             .arg("-C")
             .arg(extract_dir)
-            .output()?;
+            .stdout(Stdio::piped())
+            .stderr(Stdio::piped())
+            .stdin(Stdio::null())
+            .spawn()?;
+
+        let timed_out = child.wait_timeout(Duration::from_secs(20))?.is_none();
+        if timed_out {
+            child.kill()?;
+        }
+
+        let output = child.wait_with_output()?;
 
         println!("stdout:\n{}\n", String::from_utf8_lossy(&output.stdout));
         println!("stderr:\n{}\n", String::from_utf8_lossy(&output.stderr));
 
-        self.cmd_output_to_result(output)
+        self.cmd_output_to_result(output, timed_out)
     }
 }
