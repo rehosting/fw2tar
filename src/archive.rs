@@ -1,5 +1,6 @@
-use std::fs::File;
+use std::fs::{self, File};
 use std::io::{self, Cursor, Write};
+use std::os::unix::fs::PermissionsExt;
 use std::path::{Path, PathBuf};
 
 use flate2::write::GzEncoder;
@@ -13,12 +14,20 @@ const FIXED_TIMESTAMP: u64 = 1546318800; // Tue Jan 01 2019 05:00:00 GMT+0000
 static BAD_PREFIXES: &[&str] = &["0.tar", "squashfs-root"];
 static BAD_SUFFIXES: &[&str] = &["_extract", ".uncompressed", ".unknown"];
 
-pub fn tar_fs(rootfs_dir: &Path, tar_path: &Path, fw2tar_metadata: &Metadata) -> io::Result<()> {
-    // TODO: devices_to_ignore
+const IS_BLK_OR_CHR_MASK: u32 = libc::S_IFBLK | libc::S_IFCHR;
 
+fn is_blk_or_chr(meta: fs::Metadata) -> bool {
+    meta.is_file() && meta.permissions().mode() & IS_BLK_OR_CHR_MASK != 0
+}
+
+pub fn tar_fs(rootfs_dir: &Path, tar_path: &Path, fw2tar_metadata: &Metadata) -> io::Result<()> {
     let should_add_to_tar = |entry: &DirEntry| {
         if entry.path() == rootfs_dir {
             return true;
+        }
+
+        if entry.metadata().map(is_blk_or_chr).unwrap_or(false) {
+            return false;
         }
 
         entry
@@ -72,6 +81,11 @@ pub fn tar_fs(rootfs_dir: &Path, tar_path: &Path, fw2tar_metadata: &Metadata) ->
 
         let mut header = tar::Header::new_gnu();
         header.set_metadata_in_mode(&metadata, tar::HeaderMode::Deterministic);
+
+        if entry_path == "./" {
+            header.set_mode(0o755);
+        }
+
         header.set_path(entry_path).unwrap();
         header.set_mtime(FIXED_TIMESTAMP);
 

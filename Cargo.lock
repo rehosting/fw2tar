@@ -341,6 +341,7 @@ dependencies = [
  "clap",
  "criterion",
  "flate2",
+ "libc",
  "log",
  "pretty_env_logger",
  "serde",

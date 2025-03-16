@@ -2,7 +2,7 @@ use std::os::unix::fs::PermissionsExt;
 use std::path::Path;
 use walkdir::{DirEntry, WalkDir};
 
-const EXECUTABLE_MASK: u32 = 0o111;
+const EXECUTABLE_MASK: u32 = libc::S_IXUSR | libc::S_IXGRP | libc::S_IXOTH;
 
 static BAD_SUFFIXES: &[&str] = &[
     "_extract",

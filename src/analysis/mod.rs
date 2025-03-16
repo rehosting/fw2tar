@@ -8,7 +8,6 @@ use tempfile::TempDir;
 use thiserror::Error;
 
 pub mod directory_executables;
-pub mod find_devices;
 pub mod find_linux_filesystems;
 
 use crate::archive::tar_fs;
