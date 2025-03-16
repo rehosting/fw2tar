@@ -38,9 +38,6 @@ impl Extractor for BinwalkExtractor {
 
         let output = child.wait_with_output()?;
 
-        println!("stdout:\n{}\n", String::from_utf8_lossy(&output.stdout));
-        println!("stderr:\n{}\n", String::from_utf8_lossy(&output.stderr));
-
         self.cmd_output_to_result(output, timed_out)
     }
 }

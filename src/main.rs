@@ -14,7 +14,7 @@ fn main() {
         .output
         .clone()
         .unwrap_or_else(|| args.firmware.with_extension(""))
-        .with_extension(".rootfs.tar.gz");
+        .with_extension("rootfs.tar.gz");
 
     match fw2tar::main(args) {
         Ok(res) => match res {
