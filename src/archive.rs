@@ -86,7 +86,6 @@ pub fn tar_fs(rootfs_dir: &Path, tar_path: &Path, fw2tar_metadata: &Metadata) ->
             header.set_mode(0o755);
         }
 
-        header.set_path(entry_path).unwrap();
         header.set_mtime(FIXED_TIMESTAMP);
 
         if metadata.is_file() {
@@ -95,7 +94,7 @@ pub fn tar_fs(rootfs_dir: &Path, tar_path: &Path, fw2tar_metadata: &Metadata) ->
 
         header.set_cksum();
 
-        tar.append(&header, Cursor::new(data))?;
+        tar.append_data(&mut header, entry_path, Cursor::new(data))?;
     }
 
     tar.finish()?;
