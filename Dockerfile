@@ -110,6 +110,11 @@ ENV PATH="/root/.cargo/bin:${PATH}"
 # Install binwalk v3
 RUN cargo install binwalk
 
+# Install fw2tar
+COPY ./Cargo.toml ./Cargo.lock /fw2tar_src/
+COPY ./src /fw2tar_src/src/
+RUN cargo install --path /fw2tar_src
+
 # Explicitly install unblob deps - mostly captured above, but some of the .debs get updated and installed via curl
 RUN sh -c /unblob/unblob/install-deps.sh
 
@@ -138,9 +143,8 @@ COPY ./src/resources/banner.sh ./src/resources/fw2tar_install ./src/resources/fw
 # Warn on interactive shell sessions and provide instructions for install
 RUN echo '[ ! -z "$TERM" ] && [ -z "$NOBANNER" ] && /usr/local/bin/banner.sh' >> /etc/bash.bashrc
 
-COPY src/fw2tar /usr/local/bin/
+#COPY src/fw2tar /usr/local/bin/
 
-# Symlink for backwards compatibility
-RUN ln -s /usr/local/bin/fw2tar /usr/local/bin/fakeroot_fw2tar
+COPY src/fakeroot_fw2tar /usr/local/bin/fakeroot_fw2tar
 
 CMD ["/usr/local/bin/banner.sh"]
