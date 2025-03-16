@@ -43,12 +43,12 @@ pub fn main(args: args::Args) -> Result<BestExtractor, Fw2tarError> {
     let results: Mutex<Vec<ExtractionResult>> = Mutex::new(Vec::new());
 
     thread::scope(|threads| -> Result<(), Fw2tarError> {
-        for extractor in extractors {
-            let extractor = extractors::get_extractor(&extractor)
-                .ok_or_else(|| Fw2tarError::InvalidExtractor(extractor.clone()))?;
+        for extractor_name in extractors {
+            let extractor = extractors::get_extractor(&extractor_name)
+                .ok_or_else(|| Fw2tarError::InvalidExtractor(extractor_name.clone()))?;
 
             threads.spawn(|| {
-                extract_and_process(
+                if let Err(e) = extract_and_process(
                     extractor,
                     &args.firmware,
                     &output,
@@ -58,8 +58,9 @@ pub fn main(args: args::Args) -> Result<BestExtractor, Fw2tarError> {
                     args.secondary_limit,
                     &results,
                     &metadata,
-                )
-                .unwrap();
+                ) {
+                    log::info!("{} error: {e}", extractor.name());
+                }
             });
         }
 
