@@ -714,8 +714,7 @@ dependencies = [
 [[package]]
 name = "tar"
 version = "0.4.44"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "1d863878d212c87a19c1a610eb53bb01fe12951c0501cf5a0d65f724914a667a"
+source = "git+https://github.com/jamcleod/tar-rs#9b7e5bb75ae895653ed731ba0655e2f1c60cfa1e"
 dependencies = [
  "filetime",
  "libc",
