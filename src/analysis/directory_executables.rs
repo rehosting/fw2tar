@@ -1,0 +1,77 @@
+use std::os::unix::fs::PermissionsExt;
+use std::path::Path;
+use walkdir::{DirEntry, WalkDir};
+
+const EXECUTABLE_MASK: u32 = 0o111;
+
+static BAD_SUFFIXES: &[&str] = &[
+    "_extract",
+    ".uncompressed",
+    ".unknown",
+    "cpio-root",
+    "squashfs-root",
+    "0.tar",
+];
+
+#[derive(Debug, Clone)]
+pub struct ExecutableInfo {
+    pub total_size: u64,
+    pub total_files: usize,
+    pub total_executables: usize,
+}
+
+fn ignore_extraction_artifacts(entry: &DirEntry) -> bool {
+    entry
+        .path()
+        .file_name()
+        .map(|name| {
+            name.to_str().map(|name| {
+                for suffix in BAD_SUFFIXES {
+                    if name.ends_with(suffix) {
+                        return false;
+                    }
+                }
+
+                if name.starts_with("squashfs-root-") {
+                    return false;
+                }
+
+                true
+            })
+        })
+        .flatten()
+        .unwrap_or(true)
+}
+
+pub fn get_dir_executable_info(dir: &Path) -> ExecutableInfo {
+    let mut total_size = 0;
+    let mut total_files = 0;
+    let mut total_executables = 0;
+
+    for entry in WalkDir::new(dir)
+        .into_iter()
+        .filter_entry(ignore_extraction_artifacts)
+    {
+        let Ok(entry) = entry else { continue };
+
+        let Ok(metadata) = entry.metadata() else {
+            continue;
+        };
+
+        if metadata.is_file() {
+            total_files += 1;
+
+            if metadata.permissions().mode() & EXECUTABLE_MASK != 0 {
+                total_executables += 1;
+            }
+
+            total_size += metadata.len();
+        }
+    }
+
+    ExecutableInfo {
+        total_size,
+        total_files,
+        total_executables,
+    }
+}
