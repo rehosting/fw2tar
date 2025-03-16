@@ -20,40 +20,43 @@ pub struct ExecutableInfo {
     pub total_executables: usize,
 }
 
-fn ignore_extraction_artifacts(entry: &DirEntry) -> bool {
-    entry
-        .path()
-        .file_name()
-        .map(|name| {
-            name.to_str().map(|name| {
-                for suffix in BAD_SUFFIXES {
-                    if name.ends_with(suffix) {
-                        return false;
-                    }
-                }
-
-                if name.starts_with("squashfs-root-") {
-                    return false;
-                }
-
-                true
-            })
-        })
-        .flatten()
-        .unwrap_or(true)
-}
-
 pub fn get_dir_executable_info(dir: &Path) -> ExecutableInfo {
     let mut total_size = 0;
     let mut total_files = 0;
     let mut total_executables = 0;
+
+    let ignore_extraction_artifacts = |entry: &DirEntry| {
+        if entry.path() == dir {
+            return true;
+        }
+
+        entry
+            .path()
+            .file_name()
+            .map(|name| {
+                name.to_str().map(|name| {
+                    for suffix in BAD_SUFFIXES {
+                        if name.ends_with(suffix) {
+                            return false;
+                        }
+                    }
+
+                    if name.starts_with("squashfs-root-") {
+                        return false;
+                    }
+
+                    true
+                })
+            })
+            .flatten()
+            .unwrap_or(true)
+    };
 
     for entry in WalkDir::new(dir)
         .into_iter()
         .filter_entry(ignore_extraction_artifacts)
     {
         let Ok(entry) = entry else { continue };
-
         let Ok(metadata) = entry.metadata() else {
             continue;
         };
@@ -68,6 +71,8 @@ pub fn get_dir_executable_info(dir: &Path) -> ExecutableInfo {
             total_size += metadata.len();
         }
     }
+
+    log::info!("{dir:?}: {total_size}, {total_files}, {total_executables}");
 
     ExecutableInfo {
         total_size,
