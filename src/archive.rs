@@ -76,6 +76,12 @@ pub fn tar_fs(rootfs_dir: &Path, tar_path: &Path, fw2tar_metadata: &Metadata) ->
         let rel_path: PathBuf = entry.path().components().skip(prefix_to_skip).collect();
         let entry_path = format!("./{}", rel_path.display());
 
+        let entry_path = if !entry_path.ends_with('/') && metadata.is_dir() {
+            format!("{entry_path}/")
+        } else {
+            entry_path
+        };
+
         let data = if metadata.is_file() {
             std::fs::read(entry.path())?
         } else {
