@@ -1,10 +1,11 @@
 use std::fs::{self, File};
 use std::io::{self, Cursor, Write};
-use std::os::unix::fs::PermissionsExt;
+use std::os::unix::fs::{MetadataExt, PermissionsExt};
 use std::path::{Path, PathBuf};
 
 use flate2::write::GzEncoder;
 use flate2::Compression;
+use nix::unistd::{Gid, Group, Uid, User};
 use walkdir::{DirEntry, WalkDir};
 
 use crate::metadata::Metadata;
@@ -93,6 +94,18 @@ pub fn tar_fs(rootfs_dir: &Path, tar_path: &Path, fw2tar_metadata: &Metadata) ->
         if metadata.is_file() {
             header.set_size(data.len() as u64); // buffering to prevent ToKToU
         }
+
+        header.set_mode(metadata.permissions().mode());
+
+        if let Ok(Some(user)) = User::from_uid(Uid::from_raw(metadata.uid())) {
+            header.set_username(&user.name).unwrap();
+        }
+
+        if let Ok(Some(user)) = Group::from_gid(Gid::from_raw(metadata.gid())) {
+            header.set_groupname(&user.name).unwrap();
+        }
+
+        assert_eq!(metadata.permissions().mode(), header.mode().unwrap());
 
         header.set_cksum();
 
