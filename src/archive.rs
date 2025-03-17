@@ -90,6 +90,7 @@ pub fn tar_fs(rootfs_dir: &Path, tar_path: &Path, fw2tar_metadata: &Metadata) ->
 
         let mut header = tar::Header::new_gnu();
         header.set_metadata_in_mode(&metadata, tar::HeaderMode::Deterministic);
+        header.set_mode(metadata.permissions().mode());
 
         if entry_path == "./" {
             header.set_mode(0o755);
@@ -101,8 +102,6 @@ pub fn tar_fs(rootfs_dir: &Path, tar_path: &Path, fw2tar_metadata: &Metadata) ->
             header.set_size(data.len() as u64); // buffering to prevent ToKToU
         }
 
-        header.set_mode(metadata.permissions().mode());
-
         if let Ok(Some(user)) = User::from_uid(Uid::from_raw(metadata.uid())) {
             header.set_username(&user.name).unwrap();
         }
@@ -110,8 +109,6 @@ pub fn tar_fs(rootfs_dir: &Path, tar_path: &Path, fw2tar_metadata: &Metadata) ->
         if let Ok(Some(user)) = Group::from_gid(Gid::from_raw(metadata.gid())) {
             header.set_groupname(&user.name).unwrap();
         }
-
-        assert_eq!(metadata.permissions().mode(), header.mode().unwrap());
 
         header.set_cksum();
 
