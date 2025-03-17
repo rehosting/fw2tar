@@ -92,15 +92,6 @@ FIRMWARE_LISTING="$SCRIPT_DIR/results/ac2600_listing.txt"
 
 test $FIRMWARE_PATH $FIRMWARE_LISTING "D-Link AC2600" "binwalk,unblob"
 
-# Download NETGEAR AX5400 (RAX54S) firmware
-FIRMWARE_PATH="/tmp/rax54s_firmware.zip"
-
-curl "https://www.downloads.netgear.com/files/GDC/RAX54S/RAX54Sv2-V1.1.4.28.zip" \
-    -o "$FIRMWARE_PATH"
-
-FIRMWARE_LISTING="$SCRIPT_DIR/results/rax54s_listing.txt"
-test $FIRMWARE_PATH $FIRMWARE_LISTING "RAX54S" "binwalk"
-
 # Download Linksys AX3200
 FIRMWARE_PATH="/tmp/linksys_ax3200.img"
 
@@ -118,6 +109,15 @@ curl "https://dl.google.com/dl/edgedl/chromeos/recovery/chromeos_9334.41.3_gale_
 
 FIRMWARE_LISTING="$SCRIPT_DIR/results/google_wifi_listing.txt"
 test $FIRMWARE_PATH $FIRMWARE_LISTING "Google WiFi" "unblob,binwalk"
+
+# Download NETGEAR AX5400 (RAX54S) firmware
+FIRMWARE_PATH="/tmp/rax54s_firmware.zip"
+
+curl "https://www.downloads.netgear.com/files/GDC/RAX54S/RAX54Sv2-V1.1.4.28.zip" \
+    -o "$FIRMWARE_PATH"
+
+FIRMWARE_LISTING="$SCRIPT_DIR/results/rax54s_listing.txt"
+test $FIRMWARE_PATH $FIRMWARE_LISTING "RAX54S" "binwalk"
 
 if [[ "$failures" -gt 0 ]]; then
     echo "Saw $failures during test"
