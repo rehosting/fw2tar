@@ -1,6 +1,6 @@
 use std::fs::{self, File};
 use std::io::{self, Cursor, Write};
-use std::os::unix::fs::{MetadataExt, PermissionsExt};
+use std::os::unix::fs::{FileTypeExt, MetadataExt, PermissionsExt};
 use std::path::{Path, PathBuf};
 
 use flate2::write::GzEncoder;
@@ -15,10 +15,8 @@ const FIXED_TIMESTAMP: u64 = 1546318800; // Tue Jan 01 2019 05:00:00 GMT+0000
 static BAD_PREFIXES: &[&str] = &["0.tar", "squashfs-root"];
 static BAD_SUFFIXES: &[&str] = &["_extract", ".uncompressed", ".unknown"];
 
-const IS_BLK_OR_CHR_MASK: u32 = libc::S_IFBLK | libc::S_IFCHR;
-
 fn is_blk_or_chr(meta: fs::Metadata) -> bool {
-    meta.is_file() && meta.permissions().mode() & IS_BLK_OR_CHR_MASK != 0
+    meta.file_type().is_block_device() | meta.file_type().is_char_device()
 }
 
 pub fn tar_fs(rootfs_dir: &Path, tar_path: &Path, fw2tar_metadata: &Metadata) -> io::Result<usize> {
