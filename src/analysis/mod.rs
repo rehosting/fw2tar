@@ -88,7 +88,7 @@ pub fn extract_and_process(
     for (i, fs) in rootfs_choices.iter().enumerate() {
         if i >= primary_limit {
             println!(
-                "WARNING: skipping {n} filesystems, if files are missing you may need to set primary_limit higher",
+                "WARNING: skipping {n} filesystems, if files are missing you may need to set --primary-limit higher",
                 n=rootfs_choices.len() - primary_limit
             );
             break;
