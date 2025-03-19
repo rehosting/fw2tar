@@ -81,7 +81,7 @@ pub fn tar_fs(rootfs_dir: &Path, tar_path: &Path, fw2tar_metadata: &Metadata) ->
         };
 
         let data = if metadata.is_file() {
-            std::fs::read(entry.path())?
+            fs::read(entry.path())?
         } else {
             Vec::new()
         };
@@ -110,7 +110,15 @@ pub fn tar_fs(rootfs_dir: &Path, tar_path: &Path, fw2tar_metadata: &Metadata) ->
 
         header.set_cksum();
 
-        tar.append_data(&mut header, entry_path, Cursor::new(data))?;
+        if metadata.is_symlink() {
+            tar.append_link(
+                &mut header,
+                entry_path,
+                fs::read_link(entry.path()).unwrap(),
+            )?;
+        } else {
+            tar.append_data(&mut header, entry_path, Cursor::new(data))?;
+        }
         tar_entry_count += 1;
     }
 
