@@ -42,4 +42,8 @@ pub struct Args {
     /// Show help message for the wrapper script
     #[arg(long)]
     pub wrapper_help: bool,
+
+    /// Create a file showing all the devices removed from any of the extractions
+    #[arg(long)]
+    pub log_devices: bool,
 }

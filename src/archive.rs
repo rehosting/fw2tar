@@ -1,7 +1,10 @@
+use std::collections::HashSet;
 use std::fs::{self, File};
 use std::io::{self, Cursor, Write};
+use std::iter;
 use std::os::unix::fs::{FileTypeExt, MetadataExt, PermissionsExt};
-use std::path::{Path, PathBuf};
+use std::path::{Component, Path, PathBuf};
+use std::sync::Mutex;
 
 use flate2::write::GzEncoder;
 use flate2::Compression;
@@ -19,8 +22,14 @@ fn is_blk_or_chr(meta: fs::Metadata) -> bool {
     meta.file_type().is_block_device() | meta.file_type().is_char_device()
 }
 
-pub fn tar_fs(rootfs_dir: &Path, tar_path: &Path, fw2tar_metadata: &Metadata) -> io::Result<usize> {
+pub fn tar_fs(
+    rootfs_dir: &Path,
+    tar_path: &Path,
+    fw2tar_metadata: &Metadata,
+    removed_devices: Option<&Mutex<HashSet<PathBuf>>>,
+) -> io::Result<usize> {
     let mut tar_entry_count = 0;
+    let prefix_to_skip = rootfs_dir.components().count();
 
     let should_add_to_tar = |entry: &DirEntry| {
         if entry.path() == rootfs_dir {
@@ -28,6 +37,14 @@ pub fn tar_fs(rootfs_dir: &Path, tar_path: &Path, fw2tar_metadata: &Metadata) ->
         }
 
         if entry.metadata().map(is_blk_or_chr).unwrap_or(false) {
+            if let Some(removed_devices) = removed_devices {
+                let path = iter::once(Component::RootDir)
+                    .chain(entry.path().components().skip(prefix_to_skip))
+                    .collect();
+
+                removed_devices.lock().unwrap().insert(path);
+            }
+
             return false;
         }
 
@@ -59,8 +76,6 @@ pub fn tar_fs(rootfs_dir: &Path, tar_path: &Path, fw2tar_metadata: &Metadata) ->
     let encoder = GzEncoder::new(file, Compression::default());
 
     let mut tar = tar::Builder::new(encoder);
-
-    let prefix_to_skip = rootfs_dir.components().count();
 
     for entry in WalkDir::new(rootfs_dir)
         .into_iter()

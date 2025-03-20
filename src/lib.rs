@@ -10,6 +10,8 @@ pub use error::Fw2tarError;
 use metadata::Metadata;
 
 use std::cmp::Reverse;
+use std::collections::HashSet;
+use std::path::PathBuf;
 use std::sync::Mutex;
 use std::{env, fs, thread};
 
@@ -42,6 +44,9 @@ pub fn main(args: args::Args) -> Result<BestExtractor, Fw2tarError> {
 
     let results: Mutex<Vec<ExtractionResult>> = Mutex::new(Vec::new());
 
+    let removed_devices: Option<Mutex<HashSet<PathBuf>>> =
+        args.log_devices.then(|| Mutex::new(HashSet::new()));
+
     thread::scope(|threads| -> Result<(), Fw2tarError> {
         for extractor_name in extractors {
             let extractor = extractors::get_extractor(&extractor_name)
@@ -58,6 +63,7 @@ pub fn main(args: args::Args) -> Result<BestExtractor, Fw2tarError> {
                     args.secondary_limit,
                     &results,
                     &metadata,
+                    removed_devices.as_ref(),
                 ) {
                     log::info!("{} error: {e}", extractor.name());
                 }
@@ -66,6 +72,27 @@ pub fn main(args: args::Args) -> Result<BestExtractor, Fw2tarError> {
 
         Ok(())
     })?;
+
+    if let Some(removed_devices) = removed_devices {
+        let mut removed_devices = removed_devices
+            .into_inner()
+            .unwrap()
+            .into_iter()
+            .map(|path| path.to_string_lossy().into_owned())
+            .collect::<Vec<_>>();
+
+        removed_devices.sort();
+
+        if removed_devices.is_empty() {
+            log::warn!("No device files were found during extraction, skipping writing log");
+        } else {
+            fs::write(
+                output.with_extension("devices.log"),
+                removed_devices.join("\n"),
+            )
+            .unwrap();
+        }
+    }
 
     let results = results.lock().unwrap();
     let mut best_results: Vec<_> = results.iter().filter(|&res| res.index == 0).collect();
