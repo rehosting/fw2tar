@@ -23,6 +23,14 @@ pub enum BestExtractor {
 }
 
 pub fn main(args: args::Args) -> Result<BestExtractor, Fw2tarError> {
+    if !args.firmware.is_file() {
+        if args.firmware.exists() {
+            return Err(Fw2tarError::FirmwareNotAFile(args.firmware));
+        } else {
+            return Err(Fw2tarError::FirmwareDoesNotExist(args.firmware));
+        }
+    }
+
     let metadata = Metadata {
         input_hash: analysis::sha1_file(&args.firmware).unwrap_or_default(),
         file: args.firmware.display().to_string(),
