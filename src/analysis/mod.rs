@@ -1,3 +1,4 @@
+use std::collections::HashSet;
 use std::path::{Path, PathBuf};
 use std::sync::Mutex;
 use std::time::Instant;
@@ -49,6 +50,7 @@ pub fn extract_and_process(
     _secondary_limit: usize,
     results: &Mutex<Vec<ExtractionResult>>,
     metadata: &Metadata,
+    removed_devices: Option<&Mutex<HashSet<PathBuf>>>,
 ) -> Result<(), ExtractProcessError> {
     let extractor_name = extractor.name();
 
@@ -97,7 +99,7 @@ pub fn extract_and_process(
         let tar_path = out_file_base.with_extension(format!("{extractor_name}.{i}.tar.gz"));
 
         // XXX: improve error handling here
-        let file_node_count = tar_fs(&fs.path, &tar_path, metadata).unwrap();
+        let file_node_count = tar_fs(&fs.path, &tar_path, metadata, removed_devices).unwrap();
         let archive_hash = sha1_file(&tar_path).unwrap();
 
         results.lock().unwrap().push(ExtractionResult {
