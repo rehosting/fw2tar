@@ -2,6 +2,9 @@ use std::io;
 use std::os::unix::process::ExitStatusExt;
 use std::path::Path;
 use std::process::Output;
+use std::sync::atomic::{AtomicU64, Ordering};
+use std::time::Duration;
+
 use thiserror::Error;
 
 mod binwalk;
@@ -12,6 +15,16 @@ use {binwalk::BinwalkExtractor, binwalk3::Binwalk3Extractor, unblob::UnblobExtra
 
 pub static ALL_EXTRACTORS: &[&dyn Extractor] =
     &[&BinwalkExtractor, &Binwalk3Extractor, &UnblobExtractor];
+
+static TIMEOUT_SECS: AtomicU64 = AtomicU64::new(u64::MAX);
+
+pub fn set_timeout(secs: u64) {
+    TIMEOUT_SECS.store(secs, Ordering::Relaxed);
+}
+
+fn get_timeout() -> Duration {
+    Duration::from_secs(TIMEOUT_SECS.load(Ordering::Relaxed))
+}
 
 pub fn all_extractor_names() -> impl Iterator<Item = &'static str> {
     ALL_EXTRACTORS.into_iter().map(|extractor| extractor.name())
