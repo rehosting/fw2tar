@@ -31,6 +31,16 @@ pub fn main(args: args::Args) -> Result<BestExtractor, Fw2tarError> {
         }
     }
 
+    let output = args
+        .output
+        .unwrap_or_else(|| args.firmware.with_extension(""));
+
+    let selected_output_path = output.with_extension("rootfs.tar.gz");
+
+    if selected_output_path.exists() && !args.force {
+        return Err(Fw2tarError::OutputExists(selected_output_path));
+    }
+
     let metadata = Metadata {
         input_hash: analysis::sha1_file(&args.firmware).unwrap_or_default(),
         file: args.firmware.display().to_string(),
@@ -47,10 +57,6 @@ pub fn main(args: args::Args) -> Result<BestExtractor, Fw2tarError> {
                 .map(String::from)
                 .collect()
         });
-
-    let output = args
-        .output
-        .unwrap_or_else(|| args.firmware.with_extension(""));
 
     let results: Mutex<Vec<ExtractionResult>> = Mutex::new(Vec::new());
 
@@ -119,7 +125,7 @@ pub fn main(args: args::Args) -> Result<BestExtractor, Fw2tarError> {
 
     let best_result = best_results[0];
 
-    fs::rename(&best_result.path, output.with_extension("rootfs.tar.gz")).unwrap();
+    fs::rename(&best_result.path, selected_output_path).unwrap();
 
     result
 }
