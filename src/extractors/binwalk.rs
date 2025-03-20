@@ -1,7 +1,7 @@
-use super::{ExtractError, Extractor};
+use super::{get_timeout, ExtractError, Extractor};
 use std::path::Path;
 use std::process::{Command, Stdio};
-use std::time::Duration;
+
 use wait_timeout::ChildExt;
 
 pub struct BinwalkExtractor;
@@ -31,7 +31,7 @@ impl Extractor for BinwalkExtractor {
             .stdin(Stdio::null())
             .spawn()?;
 
-        let timed_out = child.wait_timeout(Duration::from_secs(20))?.is_none();
+        let timed_out = child.wait_timeout(get_timeout())?.is_none();
         if timed_out {
             child.kill()?;
         }

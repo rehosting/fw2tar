@@ -46,4 +46,8 @@ pub struct Args {
     /// Create a file showing all the devices removed from any of the extractions
     #[arg(long)]
     pub log_devices: bool,
+
+    /// Timeout for extractors, measured in seconds
+    #[arg(long, default_value_t = 20)]
+    pub timeout: u64,
 }

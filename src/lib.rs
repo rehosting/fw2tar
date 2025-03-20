@@ -29,6 +29,8 @@ pub fn main(args: args::Args) -> Result<BestExtractor, Fw2tarError> {
         fw2tar_command: env::args().collect(),
     };
 
+    extractors::set_timeout(args.timeout);
+
     let extractors: Vec<_> = args
         .extractors
         .map(|extractors| extractors.split(",").map(String::from).collect())
