@@ -34,3 +34,10 @@ jobs:
         with:
           name: ax1800_listing.txt
           path: /home/runner/work/fw2tar/fw2tar/tests/results/ax1800_listing.txt.new
+
+      - name: Upload RAX545 Results
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: rax54s_listing.txt
+          path: /home/runner/work/fw2tar/fw2tar/tests/results/rax54s_listing.txt.new
