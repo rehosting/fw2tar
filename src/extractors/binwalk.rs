@@ -33,6 +33,7 @@ impl Extractor for BinwalkExtractor {
 
         let timed_out = child.wait_timeout(get_timeout())?.is_none();
         if timed_out {
+            log::warn!("binwalk timed out. Use `--timeout` to let it run longer.");
             child.kill()?;
         }
 
