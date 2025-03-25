@@ -29,7 +29,7 @@ test() {
 
     echo "Extracting ${FIRMWARE_NAME}..."
 
-    $SCRIPT_DIR/../fw2tar --output $FIRMWARE_PATH_OUT --extractors $EXTRACTORS --force $FIRMWARE_PATH
+    $SCRIPT_DIR/../fw2tar --output $FIRMWARE_PATH_OUT --extractors $EXTRACTORS --timeout 120 --force $FIRMWARE_PATH
 
     if ! [ -f "$ROOTFS" ]; then
         echo -e "${RED}Failed to extract ${FIRMWARE_NAME}${END}"

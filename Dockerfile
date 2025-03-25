@@ -6,6 +6,8 @@ ENV TZ=America/New_York
 ENV LC_ALL=C.UTF-8
 ENV LANG=C.UTF-8
 ENV HOME=/root
+ENV FW2TAR_LOG=warn
+ENV FW2TAR_LOG_STYLE=always
 
 RUN apt-get update && \
   apt-get install -q -y \
@@ -142,8 +144,6 @@ COPY ./fw2tar /usr/local/src/fw2tar_wrapper
 COPY ./src/resources/banner.sh ./src/resources/fw2tar_install ./src/resources/fw2tar_install.local /usr/local/bin/
 # Warn on interactive shell sessions and provide instructions for install
 RUN echo '[ ! -z "$TERM" ] && [ -z "$NOBANNER" ] && /usr/local/bin/banner.sh' >> /etc/bash.bashrc
-
-#COPY src/fw2tar /usr/local/bin/
 
 COPY src/fakeroot_fw2tar /usr/local/bin/fakeroot_fw2tar
 
