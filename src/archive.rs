@@ -134,6 +134,7 @@ pub fn tar_fs(
         } else {
             tar.append_data(&mut header, entry_path, Cursor::new(data))?;
         }
+
         tar_entry_count += 1;
     }
 
