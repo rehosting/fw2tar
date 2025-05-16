@@ -8,7 +8,7 @@ pub struct Args {
     pub firmware: PathBuf,
 
     /// Scratch directory (optional). Default /tmp
-    #[arg(long)]
+    #[arg(long, alias("scratch_dir"))]
     pub scratch_dir: Option<PathBuf>,
 
     /// Output file base (optional). Default is firmware without extension.
@@ -24,15 +24,15 @@ pub struct Args {
     pub loud: bool,
 
     /// Create a file next to the output file reporting the extractor used
-    #[arg(long)]
+    #[arg(long, alias("report_extractor"))]
     pub report_extractor: bool,
 
     /// Maximum number of root-like filesystems to extract.
-    #[arg(long, default_value_t = 1)]
+    #[arg(long, default_value_t = 1, alias("primary_limit"))]
     pub primary_limit: usize,
 
     /// Maximum number of non-root-like filesystems to extract.
-    #[arg(long, default_value_t = 0)]
+    #[arg(long, default_value_t = 0, alias("secondary_limit"))]
     pub secondary_limit: usize,
 
     /// Overwrite existing output file
@@ -44,7 +44,7 @@ pub struct Args {
     pub wrapper_help: bool,
 
     /// Create a file showing all the devices removed from any of the extractions
-    #[arg(long)]
+    #[arg(long, alias("log_devices"))]
     pub log_devices: bool,
 
     /// Timeout for extractors, measured in seconds
