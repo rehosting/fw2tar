@@ -11,7 +11,7 @@ pub struct Args {
     #[arg(long, alias("scratch_dir"))]
     pub scratch_dir: Option<PathBuf>,
 
-    /// Output file base (optional). Default is firmware without extension.
+    /// Output file base (optional). Default is firmware without extension. Final output will have .rootfs.tar.gz appended.
     #[arg(long)]
     pub output: Option<PathBuf>,
 

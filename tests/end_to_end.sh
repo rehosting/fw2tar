@@ -2,16 +2,17 @@
 
 failures=0
 
+# Color definitions
+RED='\033[0;31m'
+GREEN='\033[0;32m'
+YELLOW='\033[0;33m'
+END='\033[0m'
+
 test() {
     FIRMWARE_PATH=$1
     FIRMWARE_LISTING=$2
     FIRMWARE_NAME=$3
     EXTRACTORS=$4
-
-    RED='\033[0;31m'
-    GREEN='\033[0;32m'
-    YELLOW='\033[0;33m'
-    END='\033[0m'
 
     OLD_FIRMWARE_LISTING="$FIRMWARE_LISTING.old"
     NEW_FIRMWARE_LISTING="$FIRMWARE_LISTING.new"
@@ -22,8 +23,8 @@ test() {
     fi
 
     FIRMWARE_PATH_OUT="${FIRMWARE_PATH}_out"
-    NAME_NO_EXT="$(basename $FIRMWARE_PATH_OUT | cut -f 1 -d '.')"
-    ROOTFS="$FIRMWARE_PATH_OUT/${NAME_NO_EXT}.rootfs.tar.gz"
+    OUTPUT_BASE="$(basename $FIRMWARE_PATH_OUT)"
+    ROOTFS="$FIRMWARE_PATH_OUT/${OUTPUT_BASE}.rootfs.tar.gz"
 
     rm -f "$ROOTFS"
 
@@ -37,6 +38,53 @@ test() {
     fi
 
     tar --utc -tvf "$ROOTFS" | awk '{ print $6 " " $2 " " $1 " " $3 " " $4  }' | column -t | LC_ALL=C LANG=C sort > $NEW_FIRMWARE_LISTING
+
+    if [[ "$NEW_FIRMWARE_LISTING" == "$OLD_FIRMWARE_LISTING" ]]; then
+        echo -e "Generated new firmware listing for ${FIRMWARE_NAME}. ${YELLOW}Nothing to diff, skipping.${END}"
+    else
+        if ! diff --color=always "$OLD_FIRMWARE_LISTING" "$NEW_FIRMWARE_LISTING"; then
+            echo -e "${RED}Listings for ${FIRMWARE_NAME} do not match.${END} To approve changes replace ${OLD_FIRMWARE_LISTING} with ${NEW_FIRMWARE_LISTING}"
+	    failures=$((failures+1))
+        else
+            echo -e "${GREEN}Firmware listing matches for ${FIRMWARE_NAME}.${END}"
+        fi
+    fi
+}
+
+# Test function that uses default output naming (no --output flag)
+# This tests the file_stem() logic that preserves version numbers
+test_default_naming() {
+    FIRMWARE_PATH=$1
+    FIRMWARE_LISTING=$2
+    FIRMWARE_NAME=$3
+    EXTRACTORS=$4
+
+    OLD_FIRMWARE_LISTING="$FIRMWARE_LISTING.old"
+    NEW_FIRMWARE_LISTING="$FIRMWARE_LISTING.new"
+
+    if ! [ -f $OLD_FIRMWARE_LISTING ]; then
+        echo "Firmware listing for ${FIRMWARE_NAME} does not exist, generating..."
+        NEW_FIRMWARE_LISTING="$OLD_FIRMWARE_LISTING"
+    fi
+
+    # Calculate expected output filename using file_stem logic (like our Rust code)
+    FIRMWARE_BASENAME="$(basename "$FIRMWARE_PATH")"
+    FIRMWARE_STEM="${FIRMWARE_BASENAME%.*}"  # Remove last extension (like file_stem())
+    EXPECTED_ROOTFS="$(dirname "$FIRMWARE_PATH")/${FIRMWARE_STEM}.rootfs.tar.gz"
+
+    rm -f "$EXPECTED_ROOTFS"
+
+    echo "Extracting ${FIRMWARE_NAME} (default naming)..."
+
+    # Run fw2tar WITHOUT --output to test default filename logic
+    $SCRIPT_DIR/../fw2tar --extractors $EXTRACTORS --timeout 120 --force $FIRMWARE_PATH
+
+    if ! [ -f "$EXPECTED_ROOTFS" ]; then
+        echo -e "${RED}Failed to extract ${FIRMWARE_NAME} - expected output: ${EXPECTED_ROOTFS}${END}"
+        exit 1
+    fi
+
+    tar --utc -tvf "$EXPECTED_ROOTFS" | awk '{ print $6 " " $2 " " $1 " " $3 " " $4  }' | column -t | LC_ALL=C LANG=C sort > $NEW_FIRMWARE_LISTING
 
     if [[ "$NEW_FIRMWARE_LISTING" == "$OLD_FIRMWARE_LISTING" ]]; then
         echo -e "Generated new firmware listing for ${FIRMWARE_NAME}. ${YELLOW}Nothing to diff, skipping.${END}"
@@ -118,6 +166,30 @@ curl "https://www.downloads.netgear.com/files/GDC/RAX54S/RAX54Sv2-V1.1.4.28.zip"
 
 FIRMWARE_LISTING="$SCRIPT_DIR/results/rax54s_listing.txt"
 test $FIRMWARE_PATH $FIRMWARE_LISTING "RAX54S" "binwalk"
+
+if [[ "$failures" -gt 0 ]]; then
+    echo "Saw $failures during test"
+    exit 1
+fi
+
+# Test default filename behavior (version number preservation)
+# Use the RAX54S firmware which has version numbers in the filename
+echo "Testing default filename behavior with version numbers..."
+
+# Use the already-downloaded RAX54S firmware: RAX54Sv2-V1.1.4.28.zip
+# This should produce: RAX54Sv2-V1.1.4.28.rootfs.tar.gz (preserving version numbers)
+FIRMWARE_LISTING="$SCRIPT_DIR/results/rax54s_default_naming_listing.txt"
+test_default_naming "$FIRMWARE_PATH" "$FIRMWARE_LISTING" "RAX54S Default Naming" "binwalk"
+
+# Verify the output filename contains the version numbers
+EXPECTED_OUTPUT="/tmp/RAX54Sv2-V1.1.4.28.rootfs.tar.gz"
+if [ -f "$EXPECTED_OUTPUT" ]; then
+    echo -e "${GREEN}✓ Version numbers preserved in default naming: $(basename "$EXPECTED_OUTPUT")${END}"
+    rm -f "$EXPECTED_OUTPUT"
+else
+    echo -e "${RED}✗ Version numbers NOT preserved in default naming - expected: $(basename "$EXPECTED_OUTPUT")${END}"
+    failures=$((failures+1))
+fi
 
 if [[ "$failures" -gt 0 ]]; then
     echo "Saw $failures during test"
