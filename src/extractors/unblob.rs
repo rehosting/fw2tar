@@ -14,6 +14,7 @@ impl Extractor for UnblobExtractor {
         in_file: &Path,
         extract_dir: &Path,
         log_file: &Path,
+        verbose: bool,
     ) -> Result<(), ExtractError> {
         let output = Command::new("unblob")
             .arg(in_file)
@@ -24,6 +25,6 @@ impl Extractor for UnblobExtractor {
             .args(&["--entropy-depth", "1"])
             .output()?;
 
-        self.cmd_output_to_result(output, false)
+        self.cmd_output_to_result(output, false, verbose)
     }
 }

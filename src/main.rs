@@ -8,16 +8,14 @@ use fw2tar::BestExtractor;
 fn main() {
     let args = Args::parse();
 
+    if args.loud && std::env::var("FW2TAR_LOG").is_err() {
+        std::env::set_var("FW2TAR_LOG", "debug");
+    }
+
     pretty_env_logger::init_custom_env("FW2TAR_LOG");
 
-    let output_path = args
-        .output
-        .clone()
-        .unwrap_or_else(|| args.firmware.with_extension(""))
-        .with_extension("rootfs.tar.gz");
-
     match fw2tar::main(args) {
-        Ok(res) => match res {
+        Ok((res, output_path)) => match res {
             BestExtractor::Best(extractor) => {
                 println!("Best extractor: {extractor}, archive at {output_path:?}");
             }

@@ -22,16 +22,14 @@ pub enum BestExtractor {
     None,
 }
 
-pub fn main(args: args::Args) -> Result<BestExtractor, Fw2tarError> {
+pub fn main(args: args::Args) -> Result<(BestExtractor, PathBuf), Fw2tarError> {
     if !args.firmware.is_file() {
         if args.firmware.exists() {
             return Err(Fw2tarError::FirmwareNotAFile(args.firmware));
         } else {
             return Err(Fw2tarError::FirmwareDoesNotExist(args.firmware));
         }
-    }
-
-    let output = args
+    }    let output = args
         .output
         .unwrap_or_else(|| args.firmware.with_extension(""));
 
@@ -114,18 +112,18 @@ pub fn main(args: args::Args) -> Result<BestExtractor, Fw2tarError> {
     let mut best_results: Vec<_> = results.iter().filter(|&res| res.index == 0).collect();
 
     let result = if best_results.is_empty() {
-        return Ok(BestExtractor::None);
+        return Ok((BestExtractor::None, selected_output_path));
     } else if best_results.len() == 1 {
-        Ok(BestExtractor::Only(best_results[0].extractor))
+        Ok((BestExtractor::Only(best_results[0].extractor), selected_output_path.clone()))
     } else {
         best_results.sort_by_key(|res| Reverse((res.file_node_count, res.extractor == "unblob")));
 
-        Ok(BestExtractor::Best(best_results[0].extractor))
+        Ok((BestExtractor::Best(best_results[0].extractor), selected_output_path.clone()))
     };
 
     let best_result = best_results[0];
 
-    fs::rename(&best_result.path, selected_output_path).unwrap();
+    fs::rename(&best_result.path, &selected_output_path).unwrap();
 
     result
 }
