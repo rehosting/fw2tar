@@ -16,6 +16,7 @@ impl Extractor for BinwalkExtractor {
         in_file: &Path,
         extract_dir: &Path,
         log_file: &Path,
+        verbose: bool,
     ) -> Result<(), ExtractError> {
         let mut child = Command::new("python3")
             .args(&["-m", "binwalk"])
@@ -39,6 +40,6 @@ impl Extractor for BinwalkExtractor {
 
         let output = child.wait_with_output()?;
 
-        self.cmd_output_to_result(output, timed_out)
+        self.cmd_output_to_result(output, timed_out, verbose)
     }
 }

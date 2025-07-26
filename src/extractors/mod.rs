@@ -60,14 +60,30 @@ pub trait Extractor: Sync {
         in_file: &Path,
         extract_dir: &Path,
         log_file: &Path,
+        verbose: bool,
     ) -> Result<(), ExtractError>;
 
-    fn cmd_output_to_result(&self, output: Output, timed_out: bool) -> Result<(), ExtractError> {
+    fn cmd_output_to_result(&self, output: Output, timed_out: bool, verbose: bool) -> Result<(), ExtractError> {
         if output.status.success() {
             Ok(())
         } else {
             if let Some(code) = output.status.code() {
-                log::error!("{} exited with error code {}", self.name(), code);
+                log::error!("{} exited with error code {}. Run with --loud to see more output", self.name(), code);
+
+                if verbose {
+                    if !output.stdout.is_empty() {
+                        if let Ok(stdout_str) = String::from_utf8(output.stdout) {
+                            log::error!("{} stdout: {}", self.name(), stdout_str.trim());
+                        }
+                    }
+
+                    if !output.stderr.is_empty() {
+                        if let Ok(stderr_str) = String::from_utf8(output.stderr) {
+                            log::error!("{} stderr: {}", self.name(), stderr_str.trim());
+                        }
+                    }
+                }
+
                 Err(ExtractError::Failed(code))
             } else if timed_out {
                 Ok(())

@@ -69,7 +69,7 @@ pub fn extract_and_process(
     let start_time = Instant::now();
 
     extractor
-        .extract(in_file, extract_dir, &log_file)
+        .extract(in_file, extract_dir, &log_file, verbose)
         .map_err(ExtractProcessError::ExtractFail)?;
 
     let elapsed = start_time.elapsed().as_secs_f32();

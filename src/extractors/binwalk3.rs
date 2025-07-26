@@ -14,6 +14,7 @@ impl Extractor for Binwalk3Extractor {
         in_file: &Path,
         extract_dir: &Path,
         log_file: &Path,
+        verbose: bool,
     ) -> Result<(), ExtractError> {
         // TODO: reimplement using binwalk Rust API? Currently a lot of logic in
         //       binwalk 3.1's main.rs I'd need to reimplement...
@@ -27,6 +28,6 @@ impl Extractor for Binwalk3Extractor {
             .arg(extract_dir)
             .output()?;
 
-        self.cmd_output_to_result(output, false)
+        self.cmd_output_to_result(output, false, verbose)
     }
 }
