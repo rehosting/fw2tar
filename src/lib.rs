@@ -29,11 +29,25 @@ pub fn main(args: args::Args) -> Result<(BestExtractor, PathBuf), Fw2tarError> {
         } else {
             return Err(Fw2tarError::FirmwareDoesNotExist(args.firmware));
         }
-    }    let output = args
-        .output
-        .unwrap_or_else(|| args.firmware.with_extension(""));
+    }
 
-    let selected_output_path = output.with_extension("rootfs.tar.gz");
+    let output = args
+        .output
+        .unwrap_or_else(|| {
+            // Use file_stem() which should behave like Python's Path.stem
+            if let Some(stem) = args.firmware.file_stem() {
+                args.firmware.with_file_name(stem)
+            } else {
+                // No stem available, use as-is
+                args.firmware.clone()
+            }
+        });
+
+    let selected_output_path = {
+        // Simple string append to avoid with_extension() being greedy
+        let file_name = output.file_name().unwrap().to_string_lossy();
+        output.with_file_name(format!("{}.rootfs.tar.gz", file_name))
+    };
 
     if selected_output_path.exists() && !args.force {
         return Err(Fw2tarError::OutputExists(selected_output_path));
