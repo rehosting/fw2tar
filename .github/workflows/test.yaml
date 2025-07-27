@@ -4,7 +4,7 @@ on: push
 
 jobs:
   build-and-test:
-    runs-on: ubuntu-latest
+    runs-on: rehosting-arc
 
     steps:
       - name: Pull latest Docker image for cache
