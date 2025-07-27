@@ -7,7 +7,7 @@ on:
 
 jobs:
   build-and-release:
-    runs-on: ubuntu-latest
+    runs-on: rehosting-arc
 
     steps:
       - name: Log in to Docker Hub
@@ -21,7 +21,7 @@ jobs:
 
       - name: Checkout code
         uses: actions/checkout@v4
-      
+
       - name: Setup runner
         run: |
               sudo apt-get update;
@@ -45,7 +45,7 @@ jobs:
             rehosting/fw2tar:latest
           cache-from: type=registry,ref=rehosting/fw2tar:latest
           cache-to: type=inline
-        
+
       - name: Create release
         id: create_release
         uses: actions/create-release@v1
