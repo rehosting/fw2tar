@@ -1,62 +1,89 @@
-name: Build and Release Container
+name: Build and Test Container
 
 on:
-  push:
+  pull_request:
     branches:
       - main
 
 jobs:
-  build-and-release:
+  build-and-test:
     runs-on: rehosting-arc
+    permissions:
+      contents: write
+      packages: write
 
     steps:
-      - name: Log in to Docker Hub
-        uses: docker/login-action@v3
-        with:
-          username: rehosting
-          password: ${{secrets.DOCKERHUB_TOKEN}}
-
-      - name: Pull latest Docker image for cache
-        run: docker pull rehosting/fw2tar:latest || true
-
       - name: Checkout code
         uses: actions/checkout@v4
-
-      - name: Setup runner
-        run: |
-              sudo apt-get update;
-              sudo apt-get install -yy curl jq
-
-      - name: Get next version
-        uses: reecetech/version-increment@2024.4.4
-        id: version
         with:
-          use_api: true
+          fetch-depth: 0
+
+      - name: Trust Harbor's self-signed certificate
+        run: |
+          echo "Fetching certificate from ${{ secrets.REHOSTING_ARC_REGISTRY }}"
+          openssl s_client -showcerts -connect ${{ secrets.REHOSTING_ARC_REGISTRY }}:443 < /dev/null 2>/dev/null | openssl x509 -outform PEM | sudo tee /usr/local/share/ca-certificates/harbor.crt > /dev/null
+          sudo update-ca-certificates
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+        with:
+          driver-opts: |
+            image=moby/buildkit:master
+            network=host
+          buildkitd-config-inline: |
+            [registry."${{ secrets.REHOSTING_ARC_REGISTRY }}"]
+              insecure = true
+              http = true
+
+      - name: Log in to Rehosting Arc Registry
+        uses: docker/login-action@v3
+        with:
+          registry: ${{ secrets.REHOSTING_ARC_REGISTRY }}
+          username: ${{ secrets.REHOSTING_ARC_REGISTRY_USER }}
+          password: ${{ secrets.REHOSTING_ARC_REGISTRY_PASSWORD }}
+
 
       - name: Build Docker image
         id: docker_build
-        uses: docker/build-push-action@v5
+        uses: docker/build-push-action@v6
         with:
           context: .
           push: true
           build-args: |
             GITHUB_TOKEN=${{ secrets.GITHUB_TOKEN }}
+            REGISTRY=${{ secrets.REHOSTING_ARC_REGISTRY }}/proxy
           tags: |
+            ${{ secrets.REHOSTING_ARC_REGISTRY }}/library/fw2tar:${{ github.sha }}
             rehosting/fw2tar:${{ github.sha }}
-            rehosting/fw2tar:${{ steps.version.outputs.version }}
-            rehosting/fw2tar:latest
-          cache-from: type=registry,ref=rehosting/fw2tar:latest
-          cache-to: type=inline
+          cache-from: |
+            type=registry,ref=${{ secrets.REHOSTING_ARC_REGISTRY }}/library/fw2tar:cache,mode=max
+            type=registry,ref=${{ secrets.REHOSTING_ARC_REGISTRY }}/library/fw2tar:cache-PR-${{github.event.number}},mode=max
+          cache-to: |
+            type=registry,ref=${{ secrets.REHOSTING_ARC_REGISTRY }}/library/fw2tar:cache,mode=max
+            type=registry,ref=${{ secrets.REHOSTING_ARC_REGISTRY }}/library/fw2tar:cache-PR-${{ github.event.number }}
 
-      - name: Create release
-        id: create_release
-        uses: actions/create-release@v1
+      - name: Run Tests
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: ./tests/end_to_end.sh
+
+      - name: Upload AX1800 Results
+        if: failure()
+        uses: actions/upload-artifact@v4
         with:
-          tag_name: ${{ steps.version.outputs.v-version }}
-          release_name: Release ${{ steps.version.outputs.v-version }} ${{ github.ref }}
-          body: |
-            Release ${{ steps.version.outputs.v-version }} @${{ github.ref }}
-          draft: false
-          prerelease: false
+          name: ax1800_listing.txt
+          path: tests/results/ax1800_listing.txt.new
+
+      - name: Upload RAX545 Results
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: rax54s_listing.txt
+          path: tests/results/rax54s_listing.txt.new
+
+      - name: Upload RAX545 Binwalk Log
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: rax54s_binwalk_log.zip
+          path: /tmp/RAX54Sv2-V1.1.4.28.zip_out/RAX54Sv2-V1.1.4.28.binwalk.log

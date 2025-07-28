@@ -1,7 +1,12 @@
 FROM ubuntu:22.04
 
-# Accept GitHub token as build argument
+# Accept GitHub token and registry as build arguments
 ARG GITHUB_TOKEN
+ARG REGISTRY
+
+# Copy download helper early for use throughout the build
+COPY ./download_github_asset.sh /usr/local/bin/download_github_asset.sh
+RUN chmod +x /usr/local/bin/download_github_asset.sh
 
 # Install unblob dependencies, curl, and fakeroot
 ENV DEBIAN_FRONTEND=noninteractive
@@ -11,6 +16,13 @@ ENV LANG=C.UTF-8
 ENV HOME=/root
 ENV FW2TAR_LOG=warn
 ENV FW2TAR_LOG_STYLE=always
+
+# Debug: Show if GitHub token is available
+RUN if [ -n "$GITHUB_TOKEN" ]; then \
+        echo "GitHub token is available for authenticated downloads"; \
+    else \
+        echo "No GitHub token provided - using unauthenticated downloads"; \
+    fi
 
 RUN apt-get update && \
   apt-get install -q -y \
@@ -89,13 +101,9 @@ RUN pip install --upgrade pip && \
     python3 -m pip install python-lzo==1.14 && \
     poetry config virtualenvs.create false
 
-RUN if [ -n "$GITHUB_TOKEN" ]; then \
-        curl -L -H "Authorization: token $GITHUB_TOKEN" -o sasquatch_1.0.deb \
-        "https://github.com/onekey-sec/sasquatch/releases/download/sasquatch-v4.5.1-4/sasquatch_1.0_$(dpkg --print-architecture).deb"; \
-    else \
-        curl -L -o sasquatch_1.0.deb \
-        "https://github.com/onekey-sec/sasquatch/releases/download/sasquatch-v4.5.1-4/sasquatch_1.0_$(dpkg --print-architecture).deb"; \
-    fi && \
+RUN GITHUB_TOKEN="$GITHUB_TOKEN" /usr/local/bin/download_github_asset.sh \
+        "https://github.com/onekey-sec/sasquatch/releases/download/sasquatch-v4.5.1-4/sasquatch_1.0_$(dpkg --print-architecture).deb" \
+        sasquatch_1.0.deb && \
     dpkg -i sasquatch_1.0.deb && \
     rm sasquatch_1.0.deb
 
@@ -112,19 +120,23 @@ RUN git clone --depth=1 https://github.com/davidribyrne/cramfs.git /cramfs && \
 RUN git clone --depth=1 https://github.com/rehosting/unblob.git /unblob
 RUN cd /unblob && poetry install --only main
 
-# Install Rust
-RUN curl https://sh.rustup.rs -sSf | bash -s -- -y
+# Install Rust with cache mount for better performance
+RUN --mount=type=cache,target=/usr/local/cargo/registry \
+    curl https://sh.rustup.rs -sSf | bash -s -- -y
 
 # Add .cargo/bin to PATH
 ENV PATH="/root/.cargo/bin:${PATH}"
 
-# Install binwalk v3
-RUN cargo install binwalk
+# Install binwalk v3 with cache mount
+RUN --mount=type=cache,target=/usr/local/cargo/registry \
+    cargo install binwalk
 
-# Install fw2tar
+# Install fw2tar with cache mount
 COPY ./Cargo.toml ./Cargo.lock /fw2tar_src/
 COPY ./src /fw2tar_src/src/
-RUN cargo install --path /fw2tar_src
+RUN --mount=type=cache,target=/usr/local/cargo/registry \
+    --mount=type=cache,target=/fw2tar_src/target \
+    cargo install --path /fw2tar_src
 
 # Explicitly install unblob deps - mostly captured above, but some of the .debs get updated and installed via curl
 RUN sh -c /unblob/unblob/install-deps.sh
@@ -145,14 +157,9 @@ RUN --mount=type=ssh git clone git@github.com:rehosting/fakeroot.git /fakeroot &
 
 # Patch to fix unblob #767 that hasn't yet been upstreamed. Pip install didn't work. I don't understand poetry
 #RUN pip install git+https://github.com/qkaiser/arpy.git
-RUN if [ -n "$GITHUB_TOKEN" ]; then \
-        curl -H "Authorization: token $GITHUB_TOKEN" \
+RUN GITHUB_TOKEN="$GITHUB_TOKEN" /usr/local/bin/download_github_asset.sh \
         "https://raw.githubusercontent.com/qkaiser/arpy/23faf88a88488c41fc4348ea2b70996803f84f40/arpy.py" \
-        -o /usr/local/lib/python3.10/dist-packages/arpy.py; \
-    else \
-        curl "https://raw.githubusercontent.com/qkaiser/arpy/23faf88a88488c41fc4348ea2b70996803f84f40/arpy.py" \
-        -o /usr/local/lib/python3.10/dist-packages/arpy.py; \
-    fi
+        /usr/local/lib/python3.10/dist-packages/arpy.py
 
 # Copy wrapper script into container so we can copy out - note we don't put it on guest path
 COPY ./fw2tar /usr/local/src/fw2tar_wrapper
