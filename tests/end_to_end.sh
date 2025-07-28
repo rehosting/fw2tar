@@ -100,17 +100,57 @@ test_default_naming() {
 
 SCRIPT_DIR=$(dirname "$(readlink -f "$0")")
 
+# Detect if we're running in a container (like CI) and adjust tmp path accordingly
 if [ -d "/host_tmp" ]; then
     TMP_DIR="/host_tmp"
 else
     TMP_DIR="/tmp"
 fi
 
+# Check for GitHub token and warn if unavailable
+if [ -z "$GITHUB_TOKEN" ]; then
+    echo -e "${YELLOW}Warning: GITHUB_TOKEN not set. Downloads from GitHub may be rate-limited.${END}"
+    echo -e "${YELLOW}If running in CI, consider setting GITHUB_TOKEN to avoid rate limits.${END}"
+fi
+
+# Wrapper function for downloading files with optional GitHub token support
+download_file() {
+    local url="$1"
+    local output_path="$2"
+    local max_retries=3
+    local retry_delay=10
+
+    echo "Downloading $(basename "$output_path") from $url"
+
+    for attempt in $(seq 1 $max_retries); do
+        if [[ "$url" == *"github.com"* ]] && [ -n "$GITHUB_TOKEN" ]; then
+            # Use GitHub token for GitHub URLs
+            if curl -L -H "Authorization: token $GITHUB_TOKEN" -o "$output_path" "$url"; then
+                echo "✓ Download successful (attempt $attempt)"
+                return 0
+            fi
+        else
+            # Regular curl for non-GitHub URLs or when no token available
+            if curl -L -o "$output_path" "$url"; then
+                echo "✓ Download successful (attempt $attempt)"
+                return 0
+            fi
+        fi
+
+        if [ $attempt -lt $max_retries ]; then
+            echo "✗ Download failed (attempt $attempt/$max_retries), retrying in ${retry_delay}s..."
+            sleep $retry_delay
+        else
+            echo "✗ Download failed after $max_retries attempts"
+            return 1
+        fi
+    done
+}
+
 # Download TP-Link AX1800 Firmware
 FIRMWARE_PATH="$TMP_DIR/ax1800_firmware.zip"
 
-curl "https://static.tp-link.com/upload/firmware/2023/202308/20230818/Archer%20AX1800(US)_V4.6_230725.zip" \
-    -o "$FIRMWARE_PATH"
+download_file "https://static.tp-link.com/upload/firmware/2023/202308/20230818/Archer%20AX1800(US)_V4.6_230725.zip" "$FIRMWARE_PATH"
 
 FIRMWARE_LISTING="$SCRIPT_DIR/results/ax1800_listing.txt"
 
@@ -119,8 +159,7 @@ test $FIRMWARE_PATH $FIRMWARE_LISTING "AX1800" "binwalk,unblob"
 # Download Mikrotik RB750Gr3 firmware
 FIRMWARE_PATH="$TMP_DIR/rb750gr3_firmware.npk"
 
-curl "https://download.mikrotik.com/routeros/7.14.3/routeros-7.14.3-mmips.npk" \
-    -o "$FIRMWARE_PATH"
+download_file "https://download.mikrotik.com/routeros/7.14.3/routeros-7.14.3-mmips.npk" "$FIRMWARE_PATH"
 
 FIRMWARE_LISTING="$SCRIPT_DIR/results/rb750gr3_listing.txt"
 
@@ -130,8 +169,7 @@ test $FIRMWARE_PATH $FIRMWARE_LISTING "RB750Gr3" "unblob"
 
 FIRMWARE_PATH="$TMP_DIR/ax86u_firmware.zip"
 
-curl "https://dlcdnets.asus.com/pub/ASUS/wireless/RT-AX86U_Pro/FW_RT_AX86U_PRO_300610234312.zip?model=RT-AX86U%20Pro" \
-    -o "$FIRMWARE_PATH"
+download_file "https://dlcdnets.asus.com/pub/ASUS/wireless/RT-AX86U_Pro/FW_RT_AX86U_PRO_300610234312.zip?model=RT-AX86U%20Pro" "$FIRMWARE_PATH"
 
 FIRMWARE_LISTING="$SCRIPT_DIR/results/ax86u_listing.txt"
 
@@ -139,8 +177,7 @@ test $FIRMWARE_PATH $FIRMWARE_LISTING "RT-AX86U Pro" "binwalk,unblob"
 
 # Download D-Link AC2600 firmware
 FIRMWARE_PATH="$TMP_DIR/dlink_ac2600_firmware.zip"
-curl "https://support.dlink.com/resource/PRODUCTS/DIR-882/REVA/DIR-882_REVA_FIRMWARE_v1.30B06.zip" \
-    -o "$FIRMWARE_PATH"
+download_file "https://support.dlink.com/resource/PRODUCTS/DIR-882/REVA/DIR-882_REVA_FIRMWARE_v1.30B06.zip" "$FIRMWARE_PATH"
 
 FIRMWARE_LISTING="$SCRIPT_DIR/results/ac2600_listing.txt"
 
@@ -149,8 +186,7 @@ test $FIRMWARE_PATH $FIRMWARE_LISTING "D-Link AC2600" "binwalk,unblob"
 # Download Linksys AX3200
 FIRMWARE_PATH="$TMP_DIR/linksys_ax3200.img"
 
-curl "https://downloads.linksys.com/support/assets/firmware/FW_E8450_1.1.01.272918_PROD_unsigned.img" \
-    -o "$FIRMWARE_PATH"
+download_file "https://downloads.linksys.com/support/assets/firmware/FW_E8450_1.1.01.272918_PROD_unsigned.img" "$FIRMWARE_PATH"
 
 FIRMWARE_LISTING="$SCRIPT_DIR/results/linksys_ax3200_listing.txt"
 test $FIRMWARE_PATH $FIRMWARE_LISTING "Linksys AX3200" "unblob,binwalk"
@@ -158,8 +194,7 @@ test $FIRMWARE_PATH $FIRMWARE_LISTING "Linksys AX3200" "unblob,binwalk"
 # Download Google WiFi Gale
 FIRMWARE_PATH="$TMP_DIR/google_wifi.zip"
 
-curl "https://dl.google.com/dl/edgedl/chromeos/recovery/chromeos_9334.41.3_gale_recovery_stable-channel_mp.bin.zip" \
-    -o "$FIRMWARE_PATH"
+download_file "https://dl.google.com/dl/edgedl/chromeos/recovery/chromeos_9334.41.3_gale_recovery_stable-channel_mp.bin.zip" "$FIRMWARE_PATH"
 
 FIRMWARE_LISTING="$SCRIPT_DIR/results/google_wifi_listing.txt"
 test $FIRMWARE_PATH $FIRMWARE_LISTING "Google WiFi" "unblob,binwalk"
@@ -167,8 +202,7 @@ test $FIRMWARE_PATH $FIRMWARE_LISTING "Google WiFi" "unblob,binwalk"
 # Download NETGEAR AX5400 (RAX54S) firmware
 FIRMWARE_PATH="$TMP_DIR/RAX54Sv2-V1.1.4.28.zip"
 
-curl "https://www.downloads.netgear.com/files/GDC/RAX54S/RAX54Sv2-V1.1.4.28.zip" \
-    -o "$FIRMWARE_PATH"
+download_file "https://www.downloads.netgear.com/files/GDC/RAX54S/RAX54Sv2-V1.1.4.28.zip" "$FIRMWARE_PATH"
 
 FIRMWARE_LISTING="$SCRIPT_DIR/results/rax54s_listing.txt"
 test $FIRMWARE_PATH $FIRMWARE_LISTING "RAX54S" "binwalk"

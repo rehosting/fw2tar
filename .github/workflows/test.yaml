@@ -26,6 +26,8 @@ jobs:
           cache-to: type=inline
 
       - name: Run Tests
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: ./tests/end_to_end.sh
 
       - name: Upload AX1800 Results
