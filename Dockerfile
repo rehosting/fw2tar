@@ -1,5 +1,8 @@
 FROM ubuntu:22.04
 
+# Accept GitHub token as build argument
+ARG GITHUB_TOKEN
+
 # Install unblob dependencies, curl, and fakeroot
 ENV DEBIAN_FRONTEND=noninteractive
 ENV TZ=America/New_York
@@ -86,7 +89,13 @@ RUN pip install --upgrade pip && \
     python3 -m pip install python-lzo==1.14 && \
     poetry config virtualenvs.create false
 
-RUN curl -L -o sasquatch_1.0.deb "https://github.com/onekey-sec/sasquatch/releases/download/sasquatch-v4.5.1-4/sasquatch_1.0_$(dpkg --print-architecture).deb" && \
+RUN if [ -n "$GITHUB_TOKEN" ]; then \
+        curl -L -H "Authorization: token $GITHUB_TOKEN" -o sasquatch_1.0.deb \
+        "https://github.com/onekey-sec/sasquatch/releases/download/sasquatch-v4.5.1-4/sasquatch_1.0_$(dpkg --print-architecture).deb"; \
+    else \
+        curl -L -o sasquatch_1.0.deb \
+        "https://github.com/onekey-sec/sasquatch/releases/download/sasquatch-v4.5.1-4/sasquatch_1.0_$(dpkg --print-architecture).deb"; \
+    fi && \
     dpkg -i sasquatch_1.0.deb && \
     rm sasquatch_1.0.deb
 
@@ -136,7 +145,14 @@ RUN --mount=type=ssh git clone git@github.com:rehosting/fakeroot.git /fakeroot &
 
 # Patch to fix unblob #767 that hasn't yet been upstreamed. Pip install didn't work. I don't understand poetry
 #RUN pip install git+https://github.com/qkaiser/arpy.git
-RUN curl "https://raw.githubusercontent.com/qkaiser/arpy/23faf88a88488c41fc4348ea2b70996803f84f40/arpy.py" -o /usr/local/lib/python3.10/dist-packages/arpy.py
+RUN if [ -n "$GITHUB_TOKEN" ]; then \
+        curl -H "Authorization: token $GITHUB_TOKEN" \
+        "https://raw.githubusercontent.com/qkaiser/arpy/23faf88a88488c41fc4348ea2b70996803f84f40/arpy.py" \
+        -o /usr/local/lib/python3.10/dist-packages/arpy.py; \
+    else \
+        curl "https://raw.githubusercontent.com/qkaiser/arpy/23faf88a88488c41fc4348ea2b70996803f84f40/arpy.py" \
+        -o /usr/local/lib/python3.10/dist-packages/arpy.py; \
+    fi
 
 # Copy wrapper script into container so we can copy out - note we don't put it on guest path
 COPY ./fw2tar /usr/local/src/fw2tar_wrapper
