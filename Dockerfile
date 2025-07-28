@@ -1,11 +1,10 @@
 FROM ubuntu:22.04
 
-# Accept GitHub token and registry as build arguments
-ARG GITHUB_TOKEN
+# Accept registry as build argument (not sensitive)
 ARG REGISTRY
 
 # Copy download helper early for use throughout the build
-COPY ./download_github_asset.sh /usr/local/bin/download_github_asset.sh
+COPY download_github_asset.sh /usr/local/bin/download_github_asset.sh
 RUN chmod +x /usr/local/bin/download_github_asset.sh
 
 # Install unblob dependencies, curl, and fakeroot
@@ -17,8 +16,9 @@ ENV HOME=/root
 ENV FW2TAR_LOG=warn
 ENV FW2TAR_LOG_STYLE=always
 
-# Debug: Show if GitHub token is available
-RUN if [ -n "$GITHUB_TOKEN" ]; then \
+# Debug: Show if GitHub token is available (using BuildKit secrets)
+RUN --mount=type=secret,id=github_token \
+    if [ -s /run/secrets/github_token ]; then \
         echo "GitHub token is available for authenticated downloads"; \
     else \
         echo "No GitHub token provided - using unauthenticated downloads"; \
@@ -101,7 +101,9 @@ RUN pip install --upgrade pip && \
     python3 -m pip install python-lzo==1.14 && \
     poetry config virtualenvs.create false
 
-RUN GITHUB_TOKEN="$GITHUB_TOKEN" /usr/local/bin/download_github_asset.sh \
+RUN --mount=type=secret,id=github_token \
+    GITHUB_TOKEN="$(cat /run/secrets/github_token 2>/dev/null || echo '')" \
+    /usr/local/bin/download_github_asset.sh \
         "https://github.com/onekey-sec/sasquatch/releases/download/sasquatch-v4.5.1-4/sasquatch_1.0_$(dpkg --print-architecture).deb" \
         sasquatch_1.0.deb && \
     dpkg -i sasquatch_1.0.deb && \
@@ -157,7 +159,9 @@ RUN --mount=type=ssh git clone git@github.com:rehosting/fakeroot.git /fakeroot &
 
 # Patch to fix unblob #767 that hasn't yet been upstreamed. Pip install didn't work. I don't understand poetry
 #RUN pip install git+https://github.com/qkaiser/arpy.git
-RUN GITHUB_TOKEN="$GITHUB_TOKEN" /usr/local/bin/download_github_asset.sh \
+RUN --mount=type=secret,id=github_token \
+    GITHUB_TOKEN="$(cat /run/secrets/github_token 2>/dev/null || echo '')" \
+    /usr/local/bin/download_github_asset.sh \
         "https://raw.githubusercontent.com/qkaiser/arpy/23faf88a88488c41fc4348ea2b70996803f84f40/arpy.py" \
         /usr/local/lib/python3.10/dist-packages/arpy.py
 

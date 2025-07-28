@@ -71,8 +71,9 @@ jobs:
           context: .
           push: true
           build-args: |
-            GITHUB_TOKEN=${{ secrets.GITHUB_TOKEN }}
             REGISTRY=${{ secrets.REHOSTING_ARC_REGISTRY }}/proxy
+          secrets: |
+            github_token=${{ secrets.GITHUB_TOKEN }}
           tags: |
             rehosting/fw2tar:${{ github.sha }}
             rehosting/fw2tar:${{ steps.version.outputs.v-version }}
