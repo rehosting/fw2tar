@@ -57,12 +57,14 @@ jobs:
         with:
           context: .
           push: true
+          load: true
           build-args: |
             REGISTRY=${{ secrets.REHOSTING_ARC_REGISTRY }}/proxy
           secrets: |
             github_token=${{ secrets.GITHUB_TOKEN }}
           tags: |
             ${{ secrets.REHOSTING_ARC_REGISTRY }}/rehosting/fw2tar:${{ github.sha }}
+            fw2tar:test-${{ github.sha }}
           cache-from: |
             type=registry,ref=${{ secrets.REHOSTING_ARC_REGISTRY }}/rehosting/fw2tar:cache,mode=max
             type=registry,ref=${{ secrets.REHOSTING_ARC_REGISTRY }}/rehosting/fw2tar:cache-PR-${{github.event.number}},mode=max
@@ -73,7 +75,7 @@ jobs:
       - name: Run Tests
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-          FW2TAR_IMAGE: ${{ secrets.REHOSTING_ARC_REGISTRY }}/rehosting/fw2tar:${{ github.sha }}
+          FW2TAR_IMAGE: fw2tar:test-${{ github.sha }}
           CLEANUP_DOWNLOADS: true
         run: ./tests/end_to_end.sh
 

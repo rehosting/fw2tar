@@ -36,6 +36,14 @@ test() {
 
     "$SCRIPT_DIR"/../fw2tar --image "${FW2TAR_IMAGE}" --output "$FIRMWARE_PATH_OUT" --extractors "$EXTRACTORS" --timeout 120 --force "$FIRMWARE_PATH"
 
+    # Debug: List what files were actually created
+    echo "Debug: Looking for output files..."
+    echo "Expected path: $ROOTFS"
+    echo "Contents of output directory:"
+    ls -la "$(dirname "$ROOTFS")" 2>/dev/null || echo "Output directory doesn't exist"
+    echo "Searching for .rootfs.tar.gz files:"
+    find "$(dirname "$FIRMWARE_PATH")" -name "*.rootfs.tar.gz" 2>/dev/null || echo "No rootfs files found"
+
     if ! [ -f "$ROOTFS" ]; then
         echo -e "${RED}Failed to extract ${FIRMWARE_NAME}${END}"
         exit 1
