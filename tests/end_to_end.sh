@@ -100,12 +100,8 @@ test_default_naming() {
 
 SCRIPT_DIR=$(dirname "$(readlink -f "$0")")
 
-# Detect if we're running in a container (like CI) and adjust tmp path accordingly
-if [ -d "/host_tmp" ]; then
-    TMP_DIR="/host_tmp"
-else
-    TMP_DIR="/tmp"
-fi
+# Use /tmp for downloads
+TMP_DIR="/tmp"
 
 echo "Using temp directory: $TMP_DIR"
 echo "Directory exists: $([ -d "$TMP_DIR" ] && echo "YES" || echo "NO")"
