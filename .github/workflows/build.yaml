@@ -65,6 +65,7 @@ jobs:
       - name: Run Tests
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          FW2TAR_IMAGE: ${{ secrets.REHOSTING_ARC_REGISTRY }}/library/fw2tar:${{ github.sha }}
         run: ./tests/end_to_end.sh
 
       - name: Upload AX1800 Results

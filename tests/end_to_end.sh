@@ -30,7 +30,7 @@ test() {
 
     echo "Extracting ${FIRMWARE_NAME}..."
 
-    $SCRIPT_DIR/../fw2tar --output $FIRMWARE_PATH_OUT --extractors $EXTRACTORS --timeout 120 --force $FIRMWARE_PATH
+    $SCRIPT_DIR/../fw2tar --image "${FW2TAR_IMAGE}" --output $FIRMWARE_PATH_OUT --extractors $EXTRACTORS --timeout 120 --force $FIRMWARE_PATH
 
     if ! [ -f "$ROOTFS" ]; then
         echo -e "${RED}Failed to extract ${FIRMWARE_NAME}${END}"
@@ -77,7 +77,7 @@ test_default_naming() {
     echo "Extracting ${FIRMWARE_NAME} (default naming)..."
 
     # Run fw2tar WITHOUT --output to test default filename logic
-    $SCRIPT_DIR/../fw2tar --extractors $EXTRACTORS --timeout 120 --force $FIRMWARE_PATH
+    $SCRIPT_DIR/../fw2tar --image "${FW2TAR_IMAGE}" --extractors $EXTRACTORS --timeout 120 --force $FIRMWARE_PATH
 
     if ! [ -f "$EXPECTED_ROOTFS" ]; then
         echo -e "${RED}Failed to extract ${FIRMWARE_NAME} - expected output: ${EXPECTED_ROOTFS}${END}"
@@ -107,11 +107,19 @@ else
     TMP_DIR="/tmp"
 fi
 
+echo "Using temp directory: $TMP_DIR"
+echo "Directory exists: $([ -d "$TMP_DIR" ] && echo "YES" || echo "NO")"
+echo "Directory is writable: $([ -w "$TMP_DIR" ] && echo "YES" || echo "NO")"
+
 # Check for GitHub token and warn if unavailable
 if [ -z "$GITHUB_TOKEN" ]; then
     echo -e "${YELLOW}Warning: GITHUB_TOKEN not set. Downloads from GitHub may be rate-limited.${END}"
     echo -e "${YELLOW}If running in CI, consider setting GITHUB_TOKEN to avoid rate limits.${END}"
 fi
+
+# Set default fw2tar image if not provided
+FW2TAR_IMAGE="${FW2TAR_IMAGE:-rehosting/fw2tar}"
+echo "Using fw2tar Docker image: $FW2TAR_IMAGE"
 
 # Wrapper function for downloading files with optional GitHub token support
 download_file() {
@@ -121,19 +129,37 @@ download_file() {
     local retry_delay=10
 
     echo "Downloading $(basename "$output_path") from $url"
+    echo "Output path: $output_path"
+
+    # Ensure the directory exists
+    mkdir -p "$(dirname "$output_path")"
 
     for attempt in $(seq 1 $max_retries); do
         if [[ "$url" == *"github.com"* ]] && [ -n "$GITHUB_TOKEN" ]; then
             # Use GitHub token for GitHub URLs
             if curl -L -H "Authorization: token $GITHUB_TOKEN" -o "$output_path" "$url"; then
                 echo "✓ Download successful (attempt $attempt)"
-                return 0
+                # Verify the file was actually created
+                if [ -f "$output_path" ] && [ -s "$output_path" ]; then
+                    echo "✓ File verified: $(ls -lh "$output_path")"
+                    return 0
+                else
+                    echo "✗ File was not created or is empty"
+                    rm -f "$output_path"
+                fi
             fi
         else
             # Regular curl for non-GitHub URLs or when no token available
             if curl -L -o "$output_path" "$url"; then
                 echo "✓ Download successful (attempt $attempt)"
-                return 0
+                # Verify the file was actually created
+                if [ -f "$output_path" ] && [ -s "$output_path" ]; then
+                    echo "✓ File verified: $(ls -lh "$output_path")"
+                    return 0
+                else
+                    echo "✗ File was not created or is empty"
+                    rm -f "$output_path"
+                fi
             fi
         fi
 
@@ -150,7 +176,18 @@ download_file() {
 # Download TP-Link AX1800 Firmware
 FIRMWARE_PATH="$TMP_DIR/ax1800_firmware.zip"
 
+echo "Downloading AX1800 firmware to: $FIRMWARE_PATH"
 download_file "https://static.tp-link.com/upload/firmware/2023/202308/20230818/Archer%20AX1800(US)_V4.6_230725.zip" "$FIRMWARE_PATH"
+
+# Verify the file was downloaded successfully
+if [ ! -f "$FIRMWARE_PATH" ]; then
+    echo -e "${RED}ERROR: Failed to download AX1800 firmware. File does not exist: $FIRMWARE_PATH${END}"
+    echo "Directory contents of $(dirname "$FIRMWARE_PATH"):"
+    ls -la "$(dirname "$FIRMWARE_PATH")" || echo "Directory does not exist"
+    exit 1
+fi
+
+echo -e "${GREEN}✓ AX1800 firmware downloaded successfully: $(ls -lh "$FIRMWARE_PATH")${END}"
 
 FIRMWARE_LISTING="$SCRIPT_DIR/results/ax1800_listing.txt"
 
