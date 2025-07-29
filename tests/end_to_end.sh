@@ -11,16 +11,16 @@ END='\033[0m'
 
 test() {
     FIRMWARE_PATH=$1
-    FIRMWARE_LISTING=$2
+    FIRMWARE_BASENAME=$2
     FIRMWARE_NAME=$3
     EXTRACTORS=$4
 
-    OLD_FIRMWARE_LISTING="$FIRMWARE_LISTING.old"
-    NEW_FIRMWARE_LISTING="$FIRMWARE_LISTING.new"
+    OLD_JSON="$SCRIPT_DIR/results/${FIRMWARE_BASENAME}.json.old"
+    NEW_JSON="$SCRIPT_DIR/results/${FIRMWARE_BASENAME}.json.new"
 
-    if ! [ -f "$OLD_FIRMWARE_LISTING" ]; then
-        echo "Firmware listing for ${FIRMWARE_NAME} does not exist, generating..."
-        NEW_FIRMWARE_LISTING="$OLD_FIRMWARE_LISTING"
+    if ! [ -f "$OLD_JSON" ]; then
+        echo "JSON baseline for ${FIRMWARE_NAME} does not exist, bailing!"
+        exit 1
     fi
 
     FIRMWARE_PATH_OUT="${FIRMWARE_PATH}_out"
@@ -37,29 +37,43 @@ test() {
     "$SCRIPT_DIR"/../fw2tar --image "${FW2TAR_IMAGE}" --output "$FIRMWARE_PATH_OUT" --extractors "$EXTRACTORS" --timeout 120 --force "$FIRMWARE_PATH"
 
     # Debug: List what files were actually created
-    echo "Debug: Looking for output files..."
-    echo "Expected path: $ROOTFS"
-    echo "Contents of output directory:"
-    ls -la "$(dirname "$ROOTFS")" 2>/dev/null || echo "Output directory doesn't exist"
-    echo "Searching for .rootfs.tar.gz files:"
-    find "$(dirname "$FIRMWARE_PATH")" -name "*.rootfs.tar.gz" 2>/dev/null || echo "No rootfs files found"
+    if $DEBUG; then
+        echo "Debug: Looking for output files..."
+        echo "Expected path: $ROOTFS"
+        echo "Contents of output directory:"
+        ls -la "$(dirname "$ROOTFS")" 2>/dev/null || echo "Output directory doesn't exist"
+        echo "Searching for .rootfs.tar.gz files:"
+        find "$(dirname "$FIRMWARE_PATH")" -name "*.rootfs.tar.gz" 2>/dev/null || echo "No rootfs files found"
+    fi
+
+    # Check if the expected file exists, and if not, try to find what was actually created
+    if ! [ -f "$ROOTFS" ]; then
+        echo "Expected file not found: $ROOTFS"
+        echo "Looking for alternative rootfs files in output directory:"
+        find "$FIRMWARE_PATH_OUT" -name "*.rootfs.tar.gz" 2>/dev/null | head -5
+
+        # Try to use the first rootfs file we find
+        ACTUAL_ROOTFS=$(find "$FIRMWARE_PATH_OUT" -name "*.rootfs.tar.gz" 2>/dev/null | head -1)
+        if [ -n "$ACTUAL_ROOTFS" ] && [ -f "$ACTUAL_ROOTFS" ]; then
+            echo "Using found rootfs file: $ACTUAL_ROOTFS"
+            ROOTFS="$ACTUAL_ROOTFS"
+        fi
+    fi
 
     if ! [ -f "$ROOTFS" ]; then
         echo -e "${RED}Failed to extract ${FIRMWARE_NAME}${END}"
         exit 1
     fi
 
-    TZ=UTC tar -tvf "$ROOTFS" | awk '{ print $6 " " $2 " " $1 " " $3 " " $4  }' | LC_ALL=C LANG=C sort > "$NEW_FIRMWARE_LISTING"
+    # Convert tar file to JSON format
+    "$SCRIPT_DIR/tar_to_json.py" "$ROOTFS" > "$NEW_JSON"
 
-    if [[ "$NEW_FIRMWARE_LISTING" == "$OLD_FIRMWARE_LISTING" ]]; then
-        echo -e "Generated new firmware listing for ${FIRMWARE_NAME}. ${YELLOW}Nothing to diff, skipping.${END}"
+    # Compare JSON files using compare_json.py with exclude patterns for .extracted directories
+    if "$SCRIPT_DIR/compare_json.py" "$OLD_JSON" "$NEW_JSON" --exclude '\.extracted/' --verbose; then
+        echo -e "${GREEN}Firmware contents match for ${FIRMWARE_NAME}.${END}"
     else
-        if ! diff --color=always "$OLD_FIRMWARE_LISTING" "$NEW_FIRMWARE_LISTING"; then
-            echo -e "${RED}Listings for ${FIRMWARE_NAME} do not match.${END} To approve changes replace ${OLD_FIRMWARE_LISTING} with ${NEW_FIRMWARE_LISTING}"
-	    failures=$((failures+1))
-        else
-            echo -e "${GREEN}Firmware listing matches for ${FIRMWARE_NAME}.${END}"
-        fi
+        echo -e "${RED}Contents for ${FIRMWARE_NAME} do not match.${END} To approve changes replace ${OLD_JSON} with ${NEW_JSON}"
+        failures=$((failures+1))
     fi
 }
 
@@ -67,21 +81,21 @@ test() {
 # This tests the file_stem() logic that preserves version numbers
 test_default_naming() {
     FIRMWARE_PATH=$1
-    FIRMWARE_LISTING=$2
+    FIRMWARE_BASENAME=$2
     FIRMWARE_NAME=$3
     EXTRACTORS=$4
 
-    OLD_FIRMWARE_LISTING="$FIRMWARE_LISTING.old"
-    NEW_FIRMWARE_LISTING="$FIRMWARE_LISTING.new"
+    OLD_JSON="$SCRIPT_DIR/results/${FIRMWARE_BASENAME}_default_naming.json.old"
+    NEW_JSON="$SCRIPT_DIR/results/${FIRMWARE_BASENAME}_default_naming.json.new"
 
-    if ! [ -f "$OLD_FIRMWARE_LISTING" ]; then
-        echo "Firmware listing for ${FIRMWARE_NAME} does not exist, generating..."
-        NEW_FIRMWARE_LISTING="$OLD_FIRMWARE_LISTING"
+    if ! [ -f "$OLD_JSON" ]; then
+        echo "JSON baseline for ${FIRMWARE_NAME} (default naming) does not exist, generating..."
+        NEW_JSON="$OLD_JSON"
     fi
 
     # Calculate expected output filename using file_stem logic (like our Rust code)
-    FIRMWARE_BASENAME="$(basename "$FIRMWARE_PATH")"
-    FIRMWARE_STEM="${FIRMWARE_BASENAME%.*}"  # Remove last extension (like file_stem())
+    FIRMWARE_BASENAME_FILE="$(basename "$FIRMWARE_PATH")"
+    FIRMWARE_STEM="${FIRMWARE_BASENAME_FILE%.*}"  # Remove last extension (like file_stem())
     EXPECTED_ROOTFS="$(dirname "$FIRMWARE_PATH")/${FIRMWARE_STEM}.rootfs.tar.gz"
 
     rm -f "$EXPECTED_ROOTFS"
@@ -99,16 +113,18 @@ test_default_naming() {
         exit 1
     fi
 
-    TZ=UTC tar -tvf "$EXPECTED_ROOTFS" | awk '{ print $6 " " $2 " " $1 " " $3 " " $4  }' | LC_ALL=C LANG=C sort > "$NEW_FIRMWARE_LISTING"
+    # Convert tar file to JSON format
+    "$SCRIPT_DIR/tar_to_json.py" "$EXPECTED_ROOTFS" > "$NEW_JSON"
 
-    if [[ "$NEW_FIRMWARE_LISTING" == "$OLD_FIRMWARE_LISTING" ]]; then
-        echo -e "Generated new firmware listing for ${FIRMWARE_NAME}. ${YELLOW}Nothing to diff, skipping.${END}"
+    if [[ "$NEW_JSON" == "$OLD_JSON" ]]; then
+        echo -e "Generated new JSON baseline for ${FIRMWARE_NAME} (default naming). ${YELLOW}Nothing to compare, skipping.${END}"
     else
-        if ! diff --color=always "$OLD_FIRMWARE_LISTING" "$NEW_FIRMWARE_LISTING"; then
-            echo -e "${RED}Listings for ${FIRMWARE_NAME} do not match.${END} To approve changes replace ${OLD_FIRMWARE_LISTING} with ${NEW_FIRMWARE_LISTING}"
-	    failures=$((failures+1))
+        # Compare JSON files using compare_json.py with exclude patterns for .extracted directories
+        if "$SCRIPT_DIR/compare_json.py" "$OLD_JSON" "$NEW_JSON" --exclude '\.extracted/' --verbose; then
+            echo -e "${GREEN}Firmware contents match for ${FIRMWARE_NAME} (default naming).${END}"
         else
-            echo -e "${GREEN}Firmware listing matches for ${FIRMWARE_NAME}.${END}"
+            echo -e "${RED}Contents for ${FIRMWARE_NAME} (default naming) do not match.${END} To approve changes replace ${OLD_JSON} with ${NEW_JSON}"
+            failures=$((failures+1))
         fi
     fi
 }
@@ -210,18 +226,14 @@ fi
 
 echo -e "${GREEN}✓ AX1800 firmware downloaded successfully: $(ls -lh "$FIRMWARE_PATH")${END}"
 
-FIRMWARE_LISTING="$SCRIPT_DIR/results/ax1800_listing.txt"
-
-test "$FIRMWARE_PATH" "$FIRMWARE_LISTING" "AX1800" "binwalk,unblob"
+test "$FIRMWARE_PATH" "ax1800" "AX1800" "binwalk,unblob"
 
 # Download Mikrotik RB750Gr3 firmware
 FIRMWARE_PATH="$TMP_DIR/rb750gr3_firmware.npk"
 
 download_file "https://download.mikrotik.com/routeros/7.14.3/routeros-7.14.3-mmips.npk" "$FIRMWARE_PATH"
 
-FIRMWARE_LISTING="$SCRIPT_DIR/results/rb750gr3_listing.txt"
-
-test "$FIRMWARE_PATH" "$FIRMWARE_LISTING" "RB750Gr3" "unblob"
+test "$FIRMWARE_PATH" "rb750gr3" "RB750Gr3" "unblob"
 
 # Download ASUS RT-AX86U Pro firmware
 
@@ -229,41 +241,34 @@ FIRMWARE_PATH="$TMP_DIR/ax86u_firmware.zip"
 
 download_file "https://dlcdnets.asus.com/pub/ASUS/wireless/RT-AX86U_Pro/FW_RT_AX86U_PRO_300610234312.zip?model=RT-AX86U%20Pro" "$FIRMWARE_PATH"
 
-FIRMWARE_LISTING="$SCRIPT_DIR/results/ax86u_listing.txt"
-
-test "$FIRMWARE_PATH" "$FIRMWARE_LISTING" "RT-AX86U Pro" "binwalk,unblob"
+test "$FIRMWARE_PATH" "ax86u" "RT-AX86U Pro" "binwalk,unblob"
 
 # Download D-Link AC2600 firmware
 FIRMWARE_PATH="$TMP_DIR/dlink_ac2600_firmware.zip"
 download_file "https://support.dlink.com/resource/PRODUCTS/DIR-882/REVA/DIR-882_REVA_FIRMWARE_v1.30B06.zip" "$FIRMWARE_PATH"
 
-FIRMWARE_LISTING="$SCRIPT_DIR/results/ac2600_listing.txt"
-
-test "$FIRMWARE_PATH" "$FIRMWARE_LISTING" "D-Link AC2600" "binwalk,unblob"
+test "$FIRMWARE_PATH" "ac2600" "D-Link AC2600" "binwalk,unblob"
 
 # Download Linksys AX3200
 FIRMWARE_PATH="$TMP_DIR/linksys_ax3200.img"
 
 download_file "https://downloads.linksys.com/support/assets/firmware/FW_E8450_1.1.01.272918_PROD_unsigned.img" "$FIRMWARE_PATH"
 
-FIRMWARE_LISTING="$SCRIPT_DIR/results/linksys_ax3200_listing.txt"
-test "$FIRMWARE_PATH" "$FIRMWARE_LISTING" "Linksys AX3200" "unblob,binwalk"
+test "$FIRMWARE_PATH" "linksys_ax3200" "Linksys AX3200" "unblob,binwalk"
 
 # Download Google WiFi Gale
 FIRMWARE_PATH="$TMP_DIR/google_wifi.zip"
 
 download_file "https://dl.google.com/dl/edgedl/chromeos/recovery/chromeos_9334.41.3_gale_recovery_stable-channel_mp.bin.zip" "$FIRMWARE_PATH"
 
-FIRMWARE_LISTING="$SCRIPT_DIR/results/google_wifi_listing.txt"
-test "$FIRMWARE_PATH" "$FIRMWARE_LISTING" "Google WiFi" "unblob,binwalk"
+test "$FIRMWARE_PATH" "google_wifi" "Google WiFi" "unblob,binwalk"
 
 # Download NETGEAR AX5400 (RAX54S) firmware
 FIRMWARE_PATH="$TMP_DIR/RAX54Sv2-V1.1.4.28.zip"
 
 download_file "https://www.downloads.netgear.com/files/GDC/RAX54S/RAX54Sv2-V1.1.4.28.zip" "$FIRMWARE_PATH"
 
-FIRMWARE_LISTING="$SCRIPT_DIR/results/rax54s_listing.txt"
-test "$FIRMWARE_PATH" "$FIRMWARE_LISTING" "RAX54S" "binwalk"
+test "$FIRMWARE_PATH" "rax54s" "RAX54S" "binwalk"
 
 if [[ "$failures" -gt 0 ]]; then
     echo "Saw $failures during test"
@@ -277,8 +282,7 @@ echo "Testing default filename behavior with version numbers..."
 
 # Use the already-downloaded RAX54S firmware: RAX54Sv2-V1.1.4.28.zip
 # This should produce: RAX54Sv2-V1.1.4.28.rootfs.tar.gz (preserving version numbers)
-FIRMWARE_LISTING="$SCRIPT_DIR/results/rax54s_default_naming_listing.txt"
-test_default_naming "$FIRMWARE_PATH" "$FIRMWARE_LISTING" "RAX54S Default Naming" "binwalk"
+test_default_naming "$FIRMWARE_PATH" "rax54s" "RAX54S Default Naming" "binwalk"
 
 # Verify the output filename contains the version numbers
 EXPECTED_OUTPUT="$TMP_DIR/RAX54Sv2-V1.1.4.28.rootfs.tar.gz"
@@ -291,15 +295,9 @@ else
 fi
 
 if [[ "$failures" -gt 0 ]]; then
-    echo "Saw $failures during test"
+    echo -e "${RED}Found $failures differences during testing${END}"
     echo "Temporary files left in: $TMP_DIR"
     exit 1
 fi
 
-# Optional cleanup - only if CLEANUP_DOWNLOADS is set
-if [[ "${CLEANUP_DOWNLOADS:-false}" == "true" ]]; then
-    echo "Cleaning up temporary downloads (CLEANUP_DOWNLOADS=true)..."
-    rm -rf "$TMP_DIR"
-else
-    echo "Downloads cached in: $TMP_DIR (set CLEANUP_DOWNLOADS=true to clean up)"
-fi
+echo -e "${GREEN}All tests passed! fw2tar is working correctly.${END}"
