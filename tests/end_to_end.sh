@@ -2,6 +2,33 @@
 
 failures=0
 DEBUG=${DEBUG:-false}
+UPDATE_MODE=false
+
+# Parse command line arguments
+while [[ $# -gt 0 ]]; do
+    case $1 in
+        --update)
+            UPDATE_MODE=true
+            shift
+            ;;
+        --debug)
+            DEBUG=true
+            shift
+            ;;
+        --help|-h)
+            echo "Usage: $0 [--update] [--debug] [--help]"
+            echo "  --update    Update baseline JSON files instead of comparing"
+            echo "  --debug     Enable debug output"
+            echo "  --help      Show this help message"
+            exit 0
+            ;;
+        *)
+            echo "Unknown option: $1"
+            echo "Use --help for usage information"
+            exit 1
+            ;;
+    esac
+done
 
 # Color definitions
 RED='\033[0;31m'
@@ -18,9 +45,13 @@ test() {
     OLD_JSON="$SCRIPT_DIR/results/${FIRMWARE_BASENAME}.json.old"
     NEW_JSON="$SCRIPT_DIR/results/${FIRMWARE_BASENAME}.json.new"
 
-    if ! [ -f "$OLD_JSON" ]; then
-        echo "JSON baseline for ${FIRMWARE_NAME} does not exist, bailing!"
-        exit 1
+    if [[ "$UPDATE_MODE" == "true" ]]; then
+        echo "Update mode: Will update baseline JSON for ${FIRMWARE_NAME}"
+    else
+        if ! [ -f "$OLD_JSON" ]; then
+            echo "JSON baseline for ${FIRMWARE_NAME} does not exist, bailing!"
+            exit 1
+        fi
     fi
 
     FIRMWARE_PATH_OUT="${FIRMWARE_PATH}_out"
@@ -68,12 +99,19 @@ test() {
     # Convert tar file to JSON format
     "$SCRIPT_DIR/tar_to_json.py" "$ROOTFS" > "$NEW_JSON"
 
-    # Compare JSON files using compare_json.py with exclude patterns for .extracted directories
-    if "$SCRIPT_DIR/compare_json.py" "$OLD_JSON" "$NEW_JSON" --exclude '\.extracted($|/)' --verbose; then
-        echo -e "${GREEN}Firmware contents match for ${FIRMWARE_NAME}.${END}"
+    if [[ "$UPDATE_MODE" == "true" ]]; then
+        # Update mode: copy new JSON to old JSON (baseline)
+        mkdir -p "$(dirname "$OLD_JSON")"
+        cp "$NEW_JSON" "$OLD_JSON"
+        echo -e "${GREEN}✓ Updated baseline JSON for ${FIRMWARE_NAME}: $OLD_JSON${END}"
     else
-        echo -e "${RED}Contents for ${FIRMWARE_NAME} do not match.${END} To approve changes replace ${OLD_JSON} with ${NEW_JSON}"
-        failures=$((failures+1))
+        # Compare JSON files using compare_json.py with exclude patterns for .extracted directories
+        if "$SCRIPT_DIR/compare_json.py" "$OLD_JSON" "$NEW_JSON" --exclude '\.extracted($|/)' --verbose; then
+            echo -e "${GREEN}Firmware contents match for ${FIRMWARE_NAME}.${END}"
+        else
+            echo -e "${RED}Contents for ${FIRMWARE_NAME} do not match.${END} To approve changes replace ${OLD_JSON} with ${NEW_JSON}"
+            failures=$((failures+1))
+        fi
     fi
 }
 
@@ -85,13 +123,7 @@ test_default_naming() {
     FIRMWARE_NAME=$3
     EXTRACTORS=$4
 
-    OLD_JSON="$SCRIPT_DIR/results/${FIRMWARE_BASENAME}_default_naming.json.old"
-    NEW_JSON="$SCRIPT_DIR/results/${FIRMWARE_BASENAME}_default_naming.json.new"
-
-    if ! [ -f "$OLD_JSON" ]; then
-        echo "JSON baseline for ${FIRMWARE_NAME} (default naming) does not exist, generating..."
-        NEW_JSON="$OLD_JSON"
-    fi
+    # This test only checks filename generation, not content comparison
 
     # Calculate expected output filename using file_stem logic (like our Rust code)
     FIRMWARE_BASENAME_FILE="$(basename "$FIRMWARE_PATH")"
@@ -112,9 +144,15 @@ test_default_naming() {
         echo -e "${RED}Failed to extract ${FIRMWARE_NAME} - expected output: ${EXPECTED_ROOTFS}${END}"
         exit 1
     fi
+
+    echo -e "${GREEN}✓ Default naming test passed for ${FIRMWARE_NAME}: $(basename "$EXPECTED_ROOTFS")${END}"
 }
 
 SCRIPT_DIR=$(cd "$(dirname "$0")" && pwd)
+
+if [[ "$UPDATE_MODE" == "true" ]]; then
+    echo -e "${YELLOW}Running in UPDATE MODE - will update baseline JSON files${END}"
+fi
 
 # Use a subdirectory relative to the script for downloads to ensure Docker volume mounting works
 TMP_DIR="$SCRIPT_DIR/tmp_downloads"
@@ -285,4 +323,8 @@ if [[ "$failures" -gt 0 ]]; then
     exit 1
 fi
 
-echo -e "${GREEN}All tests passed! fw2tar is working correctly.${END}"
+if [[ "$UPDATE_MODE" == "true" ]]; then
+    echo -e "${GREEN}All baseline JSON files updated successfully!${END}"
+else
+    echo -e "${GREEN}All tests passed! fw2tar is working correctly.${END}"
+fi
