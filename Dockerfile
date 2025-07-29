@@ -1,8 +1,6 @@
-FROM ubuntu:22.04
-
 # Accept registry as build argument (not sensitive)
 ARG REGISTRY="docker.io"
-FROM ${REGISTRY}/image_tag
+FROM ${REGISTRY}/ubuntu:22.04
 
 # Copy download helper early for use throughout the build
 COPY download_github_asset.sh /usr/local/bin/download_github_asset.sh
