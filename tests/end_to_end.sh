@@ -1,6 +1,7 @@
 #!/bin/bash
 
 failures=0
+DEBUG=${DEBUG:-false}
 
 # Color definitions
 RED='\033[0;31m'
@@ -29,6 +30,9 @@ test() {
     rm -f "$ROOTFS"
 
     echo "Extracting ${FIRMWARE_NAME}..."
+    echo "Input file: $FIRMWARE_PATH"
+    echo "Input file exists: $([ -f "$FIRMWARE_PATH" ] && echo "YES" || echo "NO")"
+    echo "Input file size: $([ -f "$FIRMWARE_PATH" ] && ls -lh "$FIRMWARE_PATH" | awk '{print $5}' || echo "N/A")"
 
     $SCRIPT_DIR/../fw2tar --image "${FW2TAR_IMAGE}" --output $FIRMWARE_PATH_OUT --extractors $EXTRACTORS --timeout 120 --force $FIRMWARE_PATH
 
@@ -75,6 +79,9 @@ test_default_naming() {
     rm -f "$EXPECTED_ROOTFS"
 
     echo "Extracting ${FIRMWARE_NAME} (default naming)..."
+    echo "Input file: $FIRMWARE_PATH"
+    echo "Input file exists: $([ -f "$FIRMWARE_PATH" ] && echo "YES" || echo "NO")"
+    echo "Expected output: $EXPECTED_ROOTFS"
 
     # Run fw2tar WITHOUT --output to test default filename logic
     $SCRIPT_DIR/../fw2tar --image "${FW2TAR_IMAGE}" --extractors $EXTRACTORS --timeout 120 --force $FIRMWARE_PATH
@@ -100,8 +107,9 @@ test_default_naming() {
 
 SCRIPT_DIR=$(dirname "$(readlink -f "$0")")
 
-# Use /tmp for downloads
-TMP_DIR="/tmp"
+# Use a subdirectory relative to the script for downloads to ensure Docker volume mounting works
+TMP_DIR="$SCRIPT_DIR/tmp_downloads"
+mkdir -p "$TMP_DIR"
 
 echo "Using temp directory: $TMP_DIR"
 echo "Directory exists: $([ -d "$TMP_DIR" ] && echo "YES" || echo "NO")"
@@ -117,15 +125,22 @@ fi
 FW2TAR_IMAGE="${FW2TAR_IMAGE:-rehosting/fw2tar}"
 echo "Using fw2tar Docker image: $FW2TAR_IMAGE"
 
-# Wrapper function for downloading files with optional GitHub token support
 download_file() {
     local url="$1"
     local output_path="$2"
     local max_retries=3
     local retry_delay=10
 
+    # Check if file already exists and is non-empty (for caching)
+    if [ -f "$output_path" ] && [ -s "$output_path" ]; then
+        echo "✓ $(basename "$output_path") already exists (cached): $(ls -lh "$output_path" | awk '{print $5}')"
+        return 0
+    fi
+
     echo "Downloading $(basename "$output_path") from $url"
-    echo "Output path: $output_path"
+    if $DEBUG; then
+        echo "Output path: $output_path"
+    fi
 
     # Ensure the directory exists
     mkdir -p "$(dirname "$output_path")"
@@ -242,6 +257,7 @@ test $FIRMWARE_PATH $FIRMWARE_LISTING "RAX54S" "binwalk"
 
 if [[ "$failures" -gt 0 ]]; then
     echo "Saw $failures during test"
+    echo "Temporary files left in: $TMP_DIR"
     exit 1
 fi
 
@@ -266,5 +282,14 @@ fi
 
 if [[ "$failures" -gt 0 ]]; then
     echo "Saw $failures during test"
+    echo "Temporary files left in: $TMP_DIR"
     exit 1
+fi
+
+# Optional cleanup - only if CLEANUP_DOWNLOADS is set
+if [[ "${CLEANUP_DOWNLOADS:-false}" == "true" ]]; then
+    echo "Cleaning up temporary downloads (CLEANUP_DOWNLOADS=true)..."
+    rm -rf "$TMP_DIR"
+else
+    echo "Downloads cached in: $TMP_DIR (set CLEANUP_DOWNLOADS=true to clean up)"
 fi
