@@ -18,13 +18,13 @@ test() {
     OLD_FIRMWARE_LISTING="$FIRMWARE_LISTING.old"
     NEW_FIRMWARE_LISTING="$FIRMWARE_LISTING.new"
 
-    if ! [ -f $OLD_FIRMWARE_LISTING ]; then
+    if ! [ -f "$OLD_FIRMWARE_LISTING" ]; then
         echo "Firmware listing for ${FIRMWARE_NAME} does not exist, generating..."
         NEW_FIRMWARE_LISTING="$OLD_FIRMWARE_LISTING"
     fi
 
     FIRMWARE_PATH_OUT="${FIRMWARE_PATH}_out"
-    OUTPUT_BASE="$(basename $FIRMWARE_PATH_OUT)"
+    OUTPUT_BASE="$(basename "$FIRMWARE_PATH_OUT")"
     ROOTFS="$FIRMWARE_PATH_OUT/${OUTPUT_BASE}.rootfs.tar.gz"
 
     rm -f "$ROOTFS"
@@ -34,14 +34,14 @@ test() {
     echo "Input file exists: $([ -f "$FIRMWARE_PATH" ] && echo "YES" || echo "NO")"
     echo "Input file size: $([ -f "$FIRMWARE_PATH" ] && ls -lh "$FIRMWARE_PATH" | awk '{print $5}' || echo "N/A")"
 
-    $SCRIPT_DIR/../fw2tar --image "${FW2TAR_IMAGE}" --output $FIRMWARE_PATH_OUT --extractors $EXTRACTORS --timeout 120 --force $FIRMWARE_PATH
+    "$SCRIPT_DIR"/../fw2tar --image "${FW2TAR_IMAGE}" --output "$FIRMWARE_PATH_OUT" --extractors "$EXTRACTORS" --timeout 120 --force "$FIRMWARE_PATH"
 
     if ! [ -f "$ROOTFS" ]; then
         echo -e "${RED}Failed to extract ${FIRMWARE_NAME}${END}"
         exit 1
     fi
 
-    tar --utc -tvf "$ROOTFS" | awk '{ print $6 " " $2 " " $1 " " $3 " " $4  }' | column -t | LC_ALL=C LANG=C sort > $NEW_FIRMWARE_LISTING
+    TZ=UTC tar -tvf "$ROOTFS" | awk '{ print $6 " " $2 " " $1 " " $3 " " $4  }' | LC_ALL=C LANG=C sort > "$NEW_FIRMWARE_LISTING"
 
     if [[ "$NEW_FIRMWARE_LISTING" == "$OLD_FIRMWARE_LISTING" ]]; then
         echo -e "Generated new firmware listing for ${FIRMWARE_NAME}. ${YELLOW}Nothing to diff, skipping.${END}"
@@ -66,7 +66,7 @@ test_default_naming() {
     OLD_FIRMWARE_LISTING="$FIRMWARE_LISTING.old"
     NEW_FIRMWARE_LISTING="$FIRMWARE_LISTING.new"
 
-    if ! [ -f $OLD_FIRMWARE_LISTING ]; then
+    if ! [ -f "$OLD_FIRMWARE_LISTING" ]; then
         echo "Firmware listing for ${FIRMWARE_NAME} does not exist, generating..."
         NEW_FIRMWARE_LISTING="$OLD_FIRMWARE_LISTING"
     fi
@@ -84,14 +84,14 @@ test_default_naming() {
     echo "Expected output: $EXPECTED_ROOTFS"
 
     # Run fw2tar WITHOUT --output to test default filename logic
-    $SCRIPT_DIR/../fw2tar --image "${FW2TAR_IMAGE}" --extractors $EXTRACTORS --timeout 120 --force $FIRMWARE_PATH
+    "$SCRIPT_DIR"/../fw2tar --image "${FW2TAR_IMAGE}" --extractors "$EXTRACTORS" --timeout 120 --force "$FIRMWARE_PATH"
 
     if ! [ -f "$EXPECTED_ROOTFS" ]; then
         echo -e "${RED}Failed to extract ${FIRMWARE_NAME} - expected output: ${EXPECTED_ROOTFS}${END}"
         exit 1
     fi
 
-    tar --utc -tvf "$EXPECTED_ROOTFS" | awk '{ print $6 " " $2 " " $1 " " $3 " " $4  }' | column -t | LC_ALL=C LANG=C sort > $NEW_FIRMWARE_LISTING
+    TZ=UTC tar -tvf "$EXPECTED_ROOTFS" | awk '{ print $6 " " $2 " " $1 " " $3 " " $4  }' | LC_ALL=C LANG=C sort > "$NEW_FIRMWARE_LISTING"
 
     if [[ "$NEW_FIRMWARE_LISTING" == "$OLD_FIRMWARE_LISTING" ]]; then
         echo -e "Generated new firmware listing for ${FIRMWARE_NAME}. ${YELLOW}Nothing to diff, skipping.${END}"
@@ -105,7 +105,7 @@ test_default_naming() {
     fi
 }
 
-SCRIPT_DIR=$(dirname "$(readlink -f "$0")")
+SCRIPT_DIR=$(cd "$(dirname "$0")" && pwd)
 
 # Use a subdirectory relative to the script for downloads to ensure Docker volume mounting works
 TMP_DIR="$SCRIPT_DIR/tmp_downloads"
@@ -145,7 +145,8 @@ download_file() {
     # Ensure the directory exists
     mkdir -p "$(dirname "$output_path")"
 
-    for attempt in $(seq 1 $max_retries); do
+    attempt=1
+    while [ $attempt -le $max_retries ]; do
         if [[ "$url" == *"github.com"* ]] && [ -n "$GITHUB_TOKEN" ]; then
             # Use GitHub token for GitHub URLs
             if curl -L -H "Authorization: token $GITHUB_TOKEN" -o "$output_path" "$url"; then
@@ -181,6 +182,7 @@ download_file() {
             echo "✗ Download failed after $max_retries attempts"
             return 1
         fi
+        attempt=$((attempt + 1))
     done
 }
 
@@ -202,7 +204,7 @@ echo -e "${GREEN}✓ AX1800 firmware downloaded successfully: $(ls -lh "$FIRMWAR
 
 FIRMWARE_LISTING="$SCRIPT_DIR/results/ax1800_listing.txt"
 
-test $FIRMWARE_PATH $FIRMWARE_LISTING "AX1800" "binwalk,unblob"
+test "$FIRMWARE_PATH" "$FIRMWARE_LISTING" "AX1800" "binwalk,unblob"
 
 # Download Mikrotik RB750Gr3 firmware
 FIRMWARE_PATH="$TMP_DIR/rb750gr3_firmware.npk"
@@ -211,7 +213,7 @@ download_file "https://download.mikrotik.com/routeros/7.14.3/routeros-7.14.3-mmi
 
 FIRMWARE_LISTING="$SCRIPT_DIR/results/rb750gr3_listing.txt"
 
-test $FIRMWARE_PATH $FIRMWARE_LISTING "RB750Gr3" "unblob"
+test "$FIRMWARE_PATH" "$FIRMWARE_LISTING" "RB750Gr3" "unblob"
 
 # Download ASUS RT-AX86U Pro firmware
 
@@ -221,7 +223,7 @@ download_file "https://dlcdnets.asus.com/pub/ASUS/wireless/RT-AX86U_Pro/FW_RT_AX
 
 FIRMWARE_LISTING="$SCRIPT_DIR/results/ax86u_listing.txt"
 
-test $FIRMWARE_PATH $FIRMWARE_LISTING "RT-AX86U Pro" "binwalk,unblob"
+test "$FIRMWARE_PATH" "$FIRMWARE_LISTING" "RT-AX86U Pro" "binwalk,unblob"
 
 # Download D-Link AC2600 firmware
 FIRMWARE_PATH="$TMP_DIR/dlink_ac2600_firmware.zip"
@@ -229,7 +231,7 @@ download_file "https://support.dlink.com/resource/PRODUCTS/DIR-882/REVA/DIR-882_
 
 FIRMWARE_LISTING="$SCRIPT_DIR/results/ac2600_listing.txt"
 
-test $FIRMWARE_PATH $FIRMWARE_LISTING "D-Link AC2600" "binwalk,unblob"
+test "$FIRMWARE_PATH" "$FIRMWARE_LISTING" "D-Link AC2600" "binwalk,unblob"
 
 # Download Linksys AX3200
 FIRMWARE_PATH="$TMP_DIR/linksys_ax3200.img"
@@ -237,7 +239,7 @@ FIRMWARE_PATH="$TMP_DIR/linksys_ax3200.img"
 download_file "https://downloads.linksys.com/support/assets/firmware/FW_E8450_1.1.01.272918_PROD_unsigned.img" "$FIRMWARE_PATH"
 
 FIRMWARE_LISTING="$SCRIPT_DIR/results/linksys_ax3200_listing.txt"
-test $FIRMWARE_PATH $FIRMWARE_LISTING "Linksys AX3200" "unblob,binwalk"
+test "$FIRMWARE_PATH" "$FIRMWARE_LISTING" "Linksys AX3200" "unblob,binwalk"
 
 # Download Google WiFi Gale
 FIRMWARE_PATH="$TMP_DIR/google_wifi.zip"
@@ -245,7 +247,7 @@ FIRMWARE_PATH="$TMP_DIR/google_wifi.zip"
 download_file "https://dl.google.com/dl/edgedl/chromeos/recovery/chromeos_9334.41.3_gale_recovery_stable-channel_mp.bin.zip" "$FIRMWARE_PATH"
 
 FIRMWARE_LISTING="$SCRIPT_DIR/results/google_wifi_listing.txt"
-test $FIRMWARE_PATH $FIRMWARE_LISTING "Google WiFi" "unblob,binwalk"
+test "$FIRMWARE_PATH" "$FIRMWARE_LISTING" "Google WiFi" "unblob,binwalk"
 
 # Download NETGEAR AX5400 (RAX54S) firmware
 FIRMWARE_PATH="$TMP_DIR/RAX54Sv2-V1.1.4.28.zip"
@@ -253,7 +255,7 @@ FIRMWARE_PATH="$TMP_DIR/RAX54Sv2-V1.1.4.28.zip"
 download_file "https://www.downloads.netgear.com/files/GDC/RAX54S/RAX54Sv2-V1.1.4.28.zip" "$FIRMWARE_PATH"
 
 FIRMWARE_LISTING="$SCRIPT_DIR/results/rax54s_listing.txt"
-test $FIRMWARE_PATH $FIRMWARE_LISTING "RAX54S" "binwalk"
+test "$FIRMWARE_PATH" "$FIRMWARE_LISTING" "RAX54S" "binwalk"
 
 if [[ "$failures" -gt 0 ]]; then
     echo "Saw $failures during test"
