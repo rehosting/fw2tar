@@ -18,6 +18,14 @@ jobs:
         with:
           fetch-depth: 0
 
+      - name: Cache firmware downloads
+        uses: actions/cache@v4
+        with:
+          path: tests/tmp_downloads
+          key: firmware-downloads-${{ hashFiles('tests/end_to_end.sh') }}
+          restore-keys: |
+            firmware-downloads-
+
       - name: Trust Harbor's self-signed certificate
         run: |
           echo "Fetching certificate from ${{ secrets.REHOSTING_ARC_REGISTRY }}"
@@ -54,18 +62,19 @@ jobs:
           secrets: |
             github_token=${{ secrets.GITHUB_TOKEN }}
           tags: |
-            ${{ secrets.REHOSTING_ARC_REGISTRY }}/library/fw2tar:${{ github.sha }}
+            ${{ secrets.REHOSTING_ARC_REGISTRY }}/rehosting/fw2tar:${{ github.sha }}
           cache-from: |
-            type=registry,ref=${{ secrets.REHOSTING_ARC_REGISTRY }}/library/fw2tar:cache,mode=max
-            type=registry,ref=${{ secrets.REHOSTING_ARC_REGISTRY }}/library/fw2tar:cache-PR-${{github.event.number}},mode=max
+            type=registry,ref=${{ secrets.REHOSTING_ARC_REGISTRY }}/rehosting/fw2tar:cache,mode=max
+            type=registry,ref=${{ secrets.REHOSTING_ARC_REGISTRY }}/rehosting/fw2tar:cache-PR-${{github.event.number}},mode=max
           cache-to: |
-            type=registry,ref=${{ secrets.REHOSTING_ARC_REGISTRY }}/library/fw2tar:cache,mode=max
-            type=registry,ref=${{ secrets.REHOSTING_ARC_REGISTRY }}/library/fw2tar:cache-PR-${{ github.event.number }}
+            type=registry,ref=${{ secrets.REHOSTING_ARC_REGISTRY }}/rehosting/fw2tar:cache,mode=max
+            type=registry,ref=${{ secrets.REHOSTING_ARC_REGISTRY }}/rehosting/fw2tar:cache-PR-${{ github.event.number }}
 
       - name: Run Tests
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-          FW2TAR_IMAGE: ${{ secrets.REHOSTING_ARC_REGISTRY }}/library/fw2tar:${{ github.sha }}
+          FW2TAR_IMAGE: ${{ secrets.REHOSTING_ARC_REGISTRY }}/rehosting/fw2tar:${{ github.sha }}
+          CLEANUP_DOWNLOADS: true
         run: ./tests/end_to_end.sh
 
       - name: Upload AX1800 Results
@@ -87,4 +96,4 @@ jobs:
         uses: actions/upload-artifact@v4
         with:
           name: rax54s_binwalk_log.zip
-          path: /tmp/RAX54Sv2-V1.1.4.28.zip_out/RAX54Sv2-V1.1.4.28.binwalk.log
+          path: tests/tmp_downloads/RAX54Sv2-V1.1.4.28.zip_out/RAX54Sv2-V1.1.4.28.binwalk.log

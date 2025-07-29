@@ -2,6 +2,7 @@
 *.sif
 *.tar.gz
 *.new
+tests/tmp_downloads/
 
 
 # Added by cargo
