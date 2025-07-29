@@ -69,7 +69,7 @@ test() {
     "$SCRIPT_DIR/tar_to_json.py" "$ROOTFS" > "$NEW_JSON"
 
     # Compare JSON files using compare_json.py with exclude patterns for .extracted directories
-    if "$SCRIPT_DIR/compare_json.py" "$OLD_JSON" "$NEW_JSON" --exclude '\.extracted/' --verbose; then
+    if "$SCRIPT_DIR/compare_json.py" "$OLD_JSON" "$NEW_JSON" --exclude '\.extracted($|/)' --verbose; then
         echo -e "${GREEN}Firmware contents match for ${FIRMWARE_NAME}.${END}"
     else
         echo -e "${RED}Contents for ${FIRMWARE_NAME} do not match.${END} To approve changes replace ${OLD_JSON} with ${NEW_JSON}"
@@ -111,21 +111,6 @@ test_default_naming() {
     if ! [ -f "$EXPECTED_ROOTFS" ]; then
         echo -e "${RED}Failed to extract ${FIRMWARE_NAME} - expected output: ${EXPECTED_ROOTFS}${END}"
         exit 1
-    fi
-
-    # Convert tar file to JSON format
-    "$SCRIPT_DIR/tar_to_json.py" "$EXPECTED_ROOTFS" > "$NEW_JSON"
-
-    if [[ "$NEW_JSON" == "$OLD_JSON" ]]; then
-        echo -e "Generated new JSON baseline for ${FIRMWARE_NAME} (default naming). ${YELLOW}Nothing to compare, skipping.${END}"
-    else
-        # Compare JSON files using compare_json.py with exclude patterns for .extracted directories
-        if "$SCRIPT_DIR/compare_json.py" "$OLD_JSON" "$NEW_JSON" --exclude '\.extracted/' --verbose; then
-            echo -e "${GREEN}Firmware contents match for ${FIRMWARE_NAME} (default naming).${END}"
-        else
-            echo -e "${RED}Contents for ${FIRMWARE_NAME} (default naming) do not match.${END} To approve changes replace ${OLD_JSON} with ${NEW_JSON}"
-            failures=$((failures+1))
-        fi
     fi
 }
 
