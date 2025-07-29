@@ -20,8 +20,7 @@ def extract_tar_to_json(tar_path: str) -> Dict[str, Any]:
     try:
         with tarfile.open(tar_path, 'r:*') as tar:
             for member in tar.getmembers():
-                # Create a clean path (normalize)
-                path = member.name.lstrip('./')
+                path = member.name
 
                 # Basic file info that's consistent across tar formats
                 file_info = {

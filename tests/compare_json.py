@@ -84,13 +84,48 @@ def filter_json_by_patterns(json_data: Dict[str, Any], exclude_patterns: List[st
     return filtered
 
 
-def compare_json_contents(json1: Dict[str, Any], json2: Dict[str, Any]) -> tuple:
+def normalize_path(path: str) -> str:
+    """Normalize a path by removing trailing slashes, but preserve root directory"""
+    if path == '/':
+        return path
+    return path.rstrip('/')
+
+
+def normalize_json_paths(json_data: Dict[str, Any]) -> Dict[str, Any]:
+    """Normalize all paths in JSON data for consistent comparison."""
+    normalized = {}
+
+    for path, info in json_data.items():
+        normalized_path = normalize_path(path)
+
+        # Debug: warn about empty paths after normalization
+        if normalized_path == '':
+            print(f"Warning: Path '{path}' normalized to empty string",
+                  file=sys.stderr)
+            # Skip empty paths to avoid issues
+            continue
+
+        if normalized_path in normalized:
+            print(f"Warning: Duplicate normalized path '{normalized_path}' "
+                  f"(original: '{path}')", file=sys.stderr)
+
+        normalized[normalized_path] = info
+
+    return normalized
+
+
+def compare_json_contents(json1: Dict[str, Any],
+                          json2: Dict[str, Any]) -> tuple:
     """Compare two JSON content dictionaries."""
     differences = []
 
+    # Normalize paths for consistent comparison
+    norm_json1 = normalize_json_paths(json1)
+    norm_json2 = normalize_json_paths(json2)
+
     # Get all file paths
-    paths1 = set(json1.keys())
-    paths2 = set(json2.keys())
+    paths1 = set(norm_json1.keys())
+    paths2 = set(norm_json2.keys())
 
     # Files only in first JSON
     only_in_first = paths1 - paths2
@@ -107,7 +142,8 @@ def compare_json_contents(json1: Dict[str, Any], json2: Dict[str, Any]) -> tuple
     file_differences = {}
 
     for path in sorted(common_paths):
-        file_diffs = compare_file_info(path, json1[path], json2[path])
+        file_diffs = compare_file_info(path, norm_json1[path],
+                                       norm_json2[path])
         if file_diffs:
             file_differences[path] = file_diffs
 
