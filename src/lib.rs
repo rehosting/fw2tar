@@ -114,8 +114,13 @@ pub fn main(args: args::Args) -> Result<(BestExtractor, PathBuf), Fw2tarError> {
         if removed_devices.is_empty() {
             log::warn!("No device files were found during extraction, skipping writing log");
         } else {
+            let devices_log_path = {
+                // Simple string append to avoid with_extension() being greedy
+                let file_name = output.file_name().unwrap().to_string_lossy();
+                output.with_file_name(format!("{}.devices.log", file_name))
+            };
             fs::write(
-                output.with_extension("devices.log"),
+                devices_log_path,
                 removed_devices.join("\n"),
             )
             .unwrap();

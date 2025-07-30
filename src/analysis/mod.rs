@@ -64,7 +64,11 @@ pub fn extract_and_process(
 
     let extract_dir = temp_dir.path();
 
-    let log_file = out_file_base.with_extension(format!("{extractor_name}.log"));
+    let log_file = {
+        // Simple string append to avoid with_extension() being greedy
+        let file_name = out_file_base.file_name().unwrap().to_string_lossy();
+        out_file_base.with_file_name(format!("{}.{extractor_name}.log", file_name))
+    };
 
     let start_time = Instant::now();
 
@@ -96,7 +100,11 @@ pub fn extract_and_process(
             break;
         }
 
-        let tar_path = out_file_base.with_extension(format!("{extractor_name}.{i}.tar.gz"));
+        let tar_path = {
+            // Simple string append to avoid with_extension() being greedy
+            let file_name = out_file_base.file_name().unwrap().to_string_lossy();
+            out_file_base.with_file_name(format!("{}.{extractor_name}.{i}.tar.gz", file_name))
+        };
 
         // XXX: improve error handling here
         let file_node_count = tar_fs(&fs.path, &tar_path, metadata, removed_devices).unwrap();
