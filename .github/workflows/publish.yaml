@@ -13,11 +13,6 @@ jobs:
       packages: write
 
     steps:
-      - name: Setup runner
-        run: |
-              sudo apt-get update;
-              sudo apt-get install -yy curl jq
-
       - name: Get next version
         uses: reecetech/version-increment@2024.4.4
         id: version
@@ -79,9 +74,9 @@ jobs:
             rehosting/fw2tar:${{ steps.version.outputs.v-version }}
             rehosting/fw2tar:latest
           cache-from: |
-            type=registry,ref=${{ secrets.REHOSTING_ARC_REGISTRY }}/library/fw2tar:cache,mode=max
+            type=registry,ref=${{ secrets.REHOSTING_ARC_REGISTRY }}/rehosting/fw2tar:cache,mode=max
           cache-to: |
-            type=registry,ref=${{ secrets.REHOSTING_ARC_REGISTRY }}/library/fw2tar:cache,mode=max
+            type=registry,ref=${{ secrets.REHOSTING_ARC_REGISTRY }}/rehosting/fw2tar:cache,mode=max
 
       - name: Create release
         id: create_release
