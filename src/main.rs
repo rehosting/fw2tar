@@ -8,8 +8,11 @@ use fw2tar::BestExtractor;
 fn main() {
     let args = Args::parse();
 
-    if args.loud && std::env::var("FW2TAR_LOG").is_err() {
-        std::env::set_var("FW2TAR_LOG", "debug");
+    if args.loud {
+        let current_env = std::env::var("FW2TAR_LOG").unwrap_or_default();
+        if !current_env.contains("trace") {
+            std::env::set_var("FW2TAR_LOG", "debug");
+        }
     }
 
     pretty_env_logger::init_custom_env("FW2TAR_LOG");
