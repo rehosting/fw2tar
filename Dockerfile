@@ -32,6 +32,7 @@ RUN apt-get update && \
     bzip2 \
     cabextract \
     clang \
+    cmake \
     cpio \
     cramfsswap \
     curl \
