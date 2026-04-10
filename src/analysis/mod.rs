@@ -54,14 +54,14 @@ pub fn extract_and_process(
 ) -> Result<(), ExtractProcessError> {
     let extractor_name = extractor.name();
 
-    let scratch_dir = scratch_dir
+    let origin_dir = scratch_dir
         .map(Path::to_path_buf)
         .unwrap_or_else(env::temp_dir);
-
+    log::debug!("looking at {:?}", scratch_dir);
     let temp_dir_prefix = format!("fw2tar_{extractor_name}");
-    let temp_dir = TempDir::with_prefix_in(temp_dir_prefix, &scratch_dir)
+    let mut temp_dir = TempDir::with_prefix_in(temp_dir_prefix, &origin_dir)
         .map_err(ExtractProcessError::TempDirFail)?;
-
+    temp_dir.disable_cleanup(scratch_dir.is_some());
     let extract_dir = temp_dir.path();
 
     let log_file = {
@@ -123,7 +123,7 @@ pub fn extract_and_process(
     }
 
     drop(temp_dir);
-
+    
     Ok(())
 }
 
