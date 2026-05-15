@@ -223,7 +223,11 @@ def build_parser() -> argparse.ArgumentParser:
         description="LLM-driven multi-shard filesystem stitching for fw2tar firmware analysis.",
     )
     parser.add_argument("-v", "--verbose", action="store_true")
-    sub = parser.add_subparsers(dest="cmd", required=True)
+    # Common subcommand flag so `fwstitch shard ... -v` works in addition to
+    # `fwstitch -v shard ...` — easier on the user.
+    common = argparse.ArgumentParser(add_help=False)
+    common.add_argument("-v", "--verbose", action="store_true")
+    sub = parser.add_subparsers(dest="cmd", required=True, parser_class=lambda **kw: argparse.ArgumentParser(parents=[common], **kw))
 
     # shard
     sp = sub.add_parser("shard", help="extract a firmware blob into per-shard tarballs + manifest")
