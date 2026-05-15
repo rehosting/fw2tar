@@ -41,3 +41,8 @@ echo -e "  $ docker run rehosting/fw2tar fw2tar_install.local | sh\n"
 echo -e "${BOLD}${RED}${STARS}Step 2: Run ${GREEN}fw2tar${RESET}${STARS}"
 echo -e "  $ fw2tar --help\n"
 
+echo -e "${BOLD}${RED}${STARS}Optional: Install ${GREEN}fwstitch${RESET}${STARS} (LLM-driven multi-filesystem stitcher)"
+echo -e "  $ docker run rehosting/fw2tar fwstitch_install | sudo sh"
+echo -e "  $ docker run rehosting/fw2tar fwstitch_install.local | sh"
+echo -e "  $ fwstitch --wrapper-help\n"
+

@@ -166,10 +166,17 @@ RUN --mount=type=secret,id=github_token \
         "https://raw.githubusercontent.com/qkaiser/arpy/23faf88a88488c41fc4348ea2b70996803f84f40/arpy.py" \
         /usr/local/lib/python3.10/dist-packages/arpy.py
 
-# Copy wrapper script into container so we can copy out - note we don't put it on guest path
+# Copy host wrappers into container so we can copy them out via the install
+# scripts — not put on guest PATH (the in-container entry points are
+# fakeroot_fw2tar and fwstitch, which live in /usr/local/bin).
 COPY ./fw2tar /usr/local/src/fw2tar_wrapper
-# And add install helpers which generate shell commands to install it on host
-COPY ./src/resources/banner.sh ./src/resources/fw2tar_install ./src/resources/fw2tar_install.local /usr/local/bin/
+COPY ./fwstitch /usr/local/src/fwstitch_wrapper
+# Install helpers (emit shell scripts the user pipes to sh / sudo sh on host)
+COPY ./src/resources/banner.sh \
+     ./src/resources/fw2tar_install ./src/resources/fw2tar_install.local \
+     ./src/resources/fwstitch_install ./src/resources/fwstitch_install.local \
+     /usr/local/bin/
+RUN chmod +x /usr/local/bin/fwstitch_install /usr/local/bin/fwstitch_install.local
 # Warn on interactive shell sessions and provide instructions for install
 RUN echo '[ ! -z "$TERM" ] && [ -z "$NOBANNER" ] && /usr/local/bin/banner.sh' >> /etc/bash.bashrc
 

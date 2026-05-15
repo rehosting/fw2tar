@@ -174,6 +174,31 @@ def _has_extract_descendant(d: Path) -> bool:
     return False
 
 
+# Of the fs types in EXTRACT_SUFFIX_TYPES, these are real on-disk filesystems
+# or whole-tree archives — when unblob produces a `*_<this>_extract` directory
+# it IS the filesystem boundary. The remainder ("gzip", "bzip2", ...) are
+# transparent compression wrappers that just unwrap to a single blob inside,
+# which we still want to recurse into.
+_TERMINAL_FS_TYPES = frozenset({
+    "squashfs", "ubifs", "ubi", "jffs2", "cramfs", "yaffs2", "yaffs",
+    "cpio", "tar", "ext", "fat", "iso9660", "romfs",
+})
+
+
+def _has_known_fs_type_suffix(name: str) -> bool:
+    """True if the dir name carries a known on-disk-filesystem suffix
+    (squashfs, ubifs, jffs2, cpio, ramdisk_el, ...) and that type is a
+    full filesystem rather than a transparent compression wrapper. unblob
+    applies these suffixes only when it identifies the chunk as a filesystem
+    image — when present, the directory IS the filesystem regardless of
+    whether unblob further recursed into individual files inside it.
+    """
+    for suffix, ty in EXTRACT_SUFFIX_TYPES:
+        if name.endswith(suffix) and ty in _TERMINAL_FS_TYPES:
+            return True
+    return False
+
+
 def _find_fs_root(extract_dir: Path) -> Path:
     """Descend through single-subdirectory wrappers (e.g. `squashfs-root`) to
     reach the actual filesystem root. Stops if the wrapper itself looks like a
@@ -213,8 +238,14 @@ def find_shards(extracted: Path, min_score: int = 3, max_depth: int = 14) -> lis
     For each terminal extract, descend through single-child wrappers (e.g.
     `squashfs-root`) to find the real filesystem root.
     """
-    # Pass 1: terminal *_extract directories. These are authoritative — unblob
-    # finished an extraction step and produced filesystem content here.
+    # Pass 1: *_extract directories that look like a complete filesystem.
+    # A directory qualifies if EITHER:
+    #   (a) its name carries a known on-disk-fs suffix (ubifs_extract,
+    #       squashfs_v4_le_extract, jffs2_extract, cpio_extract, ramdisk_el_extract,
+    #       ...) — in that case it IS the filesystem even if unblob also
+    #       recursed into a sub-blob inside it, OR
+    #   (b) it's a terminal *_extract (no further *_extract anywhere below) —
+    #       used for generic blob chains where unblob couldn't name the fs type.
     extract_candidates: set[Path] = set()
     for dirpath, dirnames, _filenames in os.walk(extracted):
         d = Path(dirpath)
@@ -224,8 +255,15 @@ def find_shards(extracted: Path, min_score: int = 3, max_depth: int = 14) -> lis
             dirnames[:] = []
             continue
         if d.name.endswith("_extract"):
-            if not _has_extract_descendant(d) and any(c.is_dir() for c in d.iterdir()):
+            qualifies = (
+                _has_known_fs_type_suffix(d.name)
+                or not _has_extract_descendant(d)
+            )
+            if qualifies and any(c.is_dir() for c in d.iterdir()):
                 extract_candidates.add(_find_fs_root(d))
+                # Don't recurse into this candidate — its insides aren't
+                # separate shards.
+                dirnames[:] = []
 
     # Pass 2: score-based fallback for trees that don't use unblob's naming
     # (binwalk output, pre-extracted directories, etc.). Gate: skip anything
@@ -531,7 +569,11 @@ def run_unblob(firmware: Path, scratch: Path, verbose: bool = False) -> Path:
         )
     out = scratch / "unblob"
     out.mkdir(parents=True, exist_ok=True)
-    cmd = ["unblob", "--extract-dir", str(out), str(firmware)]
+    # unblob's default --log is /<basename>.log which is at the filesystem
+    # root and not writable for non-root users in the container. Pin it inside
+    # the scratch dir instead.
+    log_path = scratch / "unblob.log"
+    cmd = ["unblob", "--extract-dir", str(out), "--log", str(log_path), str(firmware)]
     if verbose:
         print(f"[shard] running: {' '.join(cmd)}", file=sys.stderr)
     # unblob can be chatty even on success; suppress unless verbose.
