@@ -197,8 +197,8 @@ for m in "${maps[@]}"; do
     docker_cmd+=(-v "$m")
 done
 
-# LLM env vars
-for v in LLM_BASE_URL LLM_API_KEY LLM_MODEL LLM_INSECURE; do
+# LLM env vars — accept both LLM_API_KEY and the shorter LLM_KEY.
+for v in LLM_BASE_URL LLM_API_KEY LLM_KEY LLM_MODEL LLM_INSECURE; do
     if [[ -n "${!v-}" ]]; then
         docker_cmd+=(-e "$v=${!v}")
     fi
@@ -214,7 +214,23 @@ if $verbose; then
     echo "Mappings:"
     for m in "${maps[@]}"; do echo "  $m"; done
     echo "Docker command:"
-    echo "  ${docker_cmd[*]}"
+    redacted=()
+    redact_next=false
+    for tok in "${docker_cmd[@]}"; do
+        if $redact_next; then
+            # Redact the VALUE of an env-var assignment that names a secret.
+            case "$tok" in
+                LLM_API_KEY=*|LLM_KEY=*|*TOKEN=*|*SECRET=*|*PASSWORD=*)
+                    redacted+=("${tok%%=*}=<redacted>") ;;
+                *) redacted+=("$tok") ;;
+            esac
+            redact_next=false
+        else
+            redacted+=("$tok")
+            [[ "$tok" == "-e" ]] && redact_next=true
+        fi
+    done
+    echo "  ${redacted[*]}"
     echo
 fi
 

@@ -113,7 +113,10 @@ def _reexec_under_fakeroot(cmd_name: str) -> None:
 
 def _resolve_llm_env(args) -> tuple[str | None, str, str]:
     base_url = args.base_url or os.environ.get("LLM_BASE_URL")
-    api_key = args.api_key or os.environ.get("LLM_API_KEY") or "dummy"
+    # Accept both LLM_API_KEY (verbose) and LLM_KEY (short) — LLM_API_KEY wins
+    # if both are set, since it's the more explicit name.
+    api_key = (args.api_key or os.environ.get("LLM_API_KEY")
+               or os.environ.get("LLM_KEY") or "dummy")
     model = args.model or os.environ.get("LLM_MODEL")
     if not model:
         raise SystemExit("--model not given and LLM_MODEL not set")
