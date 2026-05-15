@@ -1,0 +1,178 @@
+#!/bin/bash
+# Host wrapper for the fw2tar shard/plan/apply stitcher inside the rehosting/fw2tar container.
+#
+# - Auto-mounts file and directory arguments under /host_<basename>
+# - Passes through LLM_BASE_URL / LLM_API_KEY / LLM_MODEL / LLM_INSECURE so the
+#   container's `plan` step can reach your local model server
+# - Uses --network host for plan/all commands so http://localhost:8000/v1 etc.
+#   on the host is reachable from inside the container
+# - Mirrors ./fw2tar style. Subcommands: shard | plan | apply | all
+#
+# Usage examples:
+#   ./fwstitch shard ./firmware.bin -o ./shards
+#   ./fwstitch plan ./shards
+#   ./fwstitch apply ./shards ./shards/stitch_plan.yaml --out ./fw.stitched.rootfs.tar.gz
+#   LLM_BASE_URL=http://localhost:8000/v1 LLM_MODEL=gpt-oss-120b \
+#     ./fwstitch all ./firmware.bin --shard-dir ./shards --out ./fw.stitched.rootfs.tar.gz
+set -eu
+
+image="rehosting/fw2tar"
+verbose=false
+network_host=false
+extra_docker_args=()
+
+# Subcommands that need network access for the LLM server.
+needs_network() {
+    case "${1:-}" in
+        plan|all) return 0 ;;
+        *) return 1 ;;
+    esac
+}
+
+print_help() {
+    cat <<EOF
+Usage: fwstitch [WRAPPER FLAGS] <subcommand> [SUBCOMMAND FLAGS] ...
+Wrapper script for running fw2tar's stitcher in a Docker container.
+
+Wrapper flags (must precede the subcommand):
+  --image NAME    image to run (default: $image)
+  --network MODE  docker network mode (default: 'host' for plan/all, bridge otherwise)
+  --verbose       print mappings + docker command
+  --wrapper-help  this message
+
+Subcommands (forwarded to fwstitch inside the container):
+  shard FIRMWARE -o SHARD_DIR        extract per-fragment .tar.gz + manifest
+  plan SHARD_DIR                     drive an LLM to produce stitch_plan.yaml
+  apply SHARD_DIR PLAN_YAML --out X  build the unified stitched .tar.gz
+  all FIRMWARE --shard-dir D --out X end-to-end
+
+Env vars forwarded into the container for plan/all:
+  LLM_BASE_URL, LLM_API_KEY, LLM_MODEL, LLM_INSECURE
+
+Pass through any subcommand-level flags as usual; this wrapper does no
+parsing of them, it only auto-mounts file and directory arguments.
+EOF
+}
+
+# Parse wrapper-level flags. Stop at the first non-flag arg (the subcommand).
+while [[ $# -gt 0 ]]; do
+    case "$1" in
+        --wrapper-help) print_help; exit 0 ;;
+        --image)        image="$2"; shift 2 ;;
+        --network)      extra_docker_args+=("--network" "$2"); network_host=true; shift 2 ;;
+        --verbose)      verbose=true; shift ;;
+        --)             shift; break ;;
+        *)              break ;;
+    esac
+done
+
+if [[ $# -eq 0 ]]; then
+    print_help
+    exit 1
+fi
+
+subcmd="$1"
+shift
+cmd=("$subcmd" "$@")
+
+# Auto-mount any arg that is an existing file or directory, plus the value
+# immediately after --out, --plan-out, --shard-dir, --from-extracted (which
+# may not exist yet but should be writable on the host).
+maps=()
+
+map_path() {
+    local arg="$1"
+    local abspath
+    if [[ -e "$arg" ]]; then
+        abspath=$(realpath "$arg")
+    elif [[ "$arg" = /* ]]; then
+        abspath="$arg"
+    else
+        abspath="$PWD/$arg"
+    fi
+    local host_dir
+    local guest_dir
+    if [[ -d "$abspath" ]]; then
+        host_dir="$abspath"
+        guest_dir="/host_$(basename "$abspath")"
+        # Replace with full guest path (the dir itself, since we mount it)
+        new_value="$guest_dir"
+    elif [[ -f "$abspath" ]]; then
+        host_dir=$(dirname "$abspath")
+        guest_dir="/host_$(basename "$host_dir")"
+        new_value="$guest_dir/$(basename "$abspath")"
+    else
+        # Path doesn't exist; assume it's an output. Create parent dir on host,
+        # then mount that.
+        local parent
+        parent=$(dirname "$abspath")
+        mkdir -p "$parent"
+        host_dir="$parent"
+        guest_dir="/host_$(basename "$parent")"
+        new_value="$guest_dir/$(basename "$abspath")"
+    fi
+    maps+=("$host_dir:$guest_dir")
+    REWRITTEN="$new_value"
+}
+
+# Rewrite cmd[] in place. We mount:
+#   * any cmd[i] that is an existing path
+#   * the value after --out / --plan-out / --shard-dir / --from-extracted
+out_flags=(--out --plan-out --shard-dir --from-extracted -o)
+for ((i=1; i<${#cmd[@]}; i++)); do
+    arg="${cmd[$i]}"
+    prev="${cmd[$((i-1))]}"
+    is_out_value=false
+    for f in "${out_flags[@]}"; do
+        if [[ "$prev" == "$f" ]]; then is_out_value=true; break; fi
+    done
+    if $is_out_value || [[ -e "$arg" ]]; then
+        if [[ "$arg" == -* ]]; then continue; fi
+        map_path "$arg"
+        cmd[$i]="$REWRITTEN"
+    fi
+done
+
+# Deduplicate and sort mappings (longest first to avoid shadowing).
+if [[ ${#maps[@]} -gt 0 ]]; then
+    IFS=$'\n' maps=($(printf '%s\n' "${maps[@]}" | sort -u))
+    unset IFS
+fi
+
+# Build docker command
+docker_cmd=(docker run --rm)
+docker_cmd+=(-u "$(id -u):$(id -g)")
+
+# Network: --network host for plan/all unless the user overrode it
+if ! $network_host && needs_network "$subcmd"; then
+    docker_cmd+=(--network host)
+fi
+docker_cmd+=("${extra_docker_args[@]}")
+
+# Mounts
+for m in "${maps[@]}"; do
+    docker_cmd+=(-v "$m")
+done
+
+# LLM env vars
+for v in LLM_BASE_URL LLM_API_KEY LLM_MODEL LLM_INSECURE; do
+    if [[ -n "${!v-}" ]]; then
+        docker_cmd+=(-e "$v=${!v}")
+    fi
+done
+
+# fw2tar hash for traceability (matches ./fw2tar)
+hash=$(sha1sum "$0" | awk '{print $1}')
+docker_cmd+=(-e "FWSTITCH_HASH=$hash")
+
+docker_cmd+=("$image" fwstitch "${cmd[@]}")
+
+if $verbose; then
+    echo "Mappings:"
+    for m in "${maps[@]}"; do echo "  $m"; done
+    echo "Docker command:"
+    echo "  ${docker_cmd[*]}"
+    echo
+fi
+
+exec "${docker_cmd[@]}"

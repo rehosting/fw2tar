@@ -3,6 +3,7 @@
 *.tar.gz
 *.new
 tests/tmp_downloads/
+__pycache__/
 
 
 # Added by cargo
