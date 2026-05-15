@@ -84,9 +84,11 @@ RUN pip install --upgrade pip && \
       git+https://github.com/marin-m/vmlinux-to-elf \
       jefferson \
       gnupg \
+      openai \
       poetry \
       psycopg2-binary \
       pycryptodome \
+      pydantic \
       pylzma \
       pyyaml \
       setuptools \
@@ -172,5 +174,16 @@ COPY ./src/resources/banner.sh ./src/resources/fw2tar_install ./src/resources/fw
 RUN echo '[ ! -z "$TERM" ] && [ -z "$NOBANNER" ] && /usr/local/bin/banner.sh' >> /etc/bash.bashrc
 
 COPY src/fakeroot_fw2tar /usr/local/bin/fakeroot_fw2tar
+
+# Multi-filesystem stitcher (utils/stitch). The package goes to /opt/fw2tar so
+# `python3 -m stitch ...` works; `fwstitch` is a thin shim on PATH. The
+# Python entry point auto-re-execs under fakeroot for the `shard`/`all`
+# subcommands so firmware uid/gid metadata is preserved.
+COPY ./utils/stitch /opt/fw2tar/stitch
+RUN printf '%s\n' \
+        '#!/bin/bash' \
+        'exec env PYTHONPATH="/opt/fw2tar${PYTHONPATH:+:$PYTHONPATH}" python3 -m stitch "$@"' \
+        > /usr/local/bin/fwstitch && \
+    chmod +x /usr/local/bin/fwstitch
 
 CMD ["/usr/local/bin/banner.sh"]
