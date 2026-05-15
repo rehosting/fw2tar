@@ -161,7 +161,7 @@ map_path() {
 # Rewrite cmd[] in place. We mount:
 #   * any cmd[i] that is an existing path
 #   * the value after --out / --plan-out / --shard-dir / --from-extracted
-out_flags=(--out --plan-out --shard-dir --from-extracted -o)
+out_flags=(--out --plan-out --shard-dir --from-extracted --debug-transcript -o)
 for ((i=1; i<${#cmd[@]}; i++)); do
     arg="${cmd[$i]}"
     prev="${cmd[$((i-1))]}"
