@@ -18,6 +18,59 @@ from .harness import HarnessConfig, run
 from .plan import apply_plan, dump_plan, load_plan
 
 
+def _load_env_file(path: Path) -> int:
+    """Load KEY=VALUE lines from a .env file. Process env wins (we only set
+    keys that aren't already in os.environ). Returns the number of keys set.
+    """
+    if not path.is_file():
+        return 0
+    count = 0
+    with open(path, "r") as f:
+        for raw in f:
+            line = raw.strip()
+            if not line or line.startswith("#"):
+                continue
+            if line.startswith("export "):
+                line = line[len("export "):]
+            if "=" not in line:
+                continue
+            key, _, value = line.partition("=")
+            key = key.strip()
+            value = value.strip()
+            # Strip matched surrounding quotes
+            if len(value) >= 2 and value[0] == value[-1] and value[0] in ("'", '"'):
+                value = value[1:-1]
+            if key and key.isidentifier() and key not in os.environ:
+                os.environ[key] = value
+                count += 1
+    return count
+
+
+def _autoload_env_files() -> None:
+    """Load ./.env then ~/.config/fwstitch/.env. _load_env_file only sets
+    keys not already in os.environ, so the more-specific source wins:
+    process env > --env-file > ./.env > ~/.config/fwstitch/.env.
+    """
+    paths = [
+        Path(".env"),
+        Path.home() / ".config" / "fwstitch" / ".env",
+    ]
+    for p in paths:
+        _load_env_file(p)
+
+
+def _peek_arg(argv: list[str], flag: str) -> str | None:
+    """Pull a flag's value out of argv before argparse runs. Returns None if
+    the flag isn't present. Supports both `--flag VAL` and `--flag=VAL` forms.
+    """
+    for i, a in enumerate(argv):
+        if a == flag and i + 1 < len(argv):
+            return argv[i + 1]
+        if a.startswith(flag + "="):
+            return a.split("=", 1)[1]
+    return None
+
+
 # Commands that perform on-disk extraction and therefore need fakeroot so that
 # uid/gid metadata from the firmware survives into the shard tarballs. `plan`
 # and `apply` are read-only / tar-header-only and don't need it.
@@ -223,6 +276,9 @@ def build_parser() -> argparse.ArgumentParser:
         description="LLM-driven multi-shard filesystem stitching for fw2tar firmware analysis.",
     )
     parser.add_argument("-v", "--verbose", action="store_true")
+    parser.add_argument("--env-file", default=None,
+                        help="Load KEY=VALUE pairs from this file. Auto-discovers "
+                             "~/.config/fwstitch/.env and ./.env if present (process env wins).")
     # Common subcommand flag so `fwstitch shard ... -v` works in addition to
     # `fwstitch -v shard ...` — easier on the user.
     common = argparse.ArgumentParser(add_help=False)
@@ -283,6 +339,13 @@ def build_parser() -> argparse.ArgumentParser:
 
 
 def main(argv: list[str] | None = None) -> int:
+    # Auto-load env files first (before reading any env vars). Done early so
+    # the fakeroot re-exec inherits the resulting environment too.
+    _autoload_env_files()
+    explicit = _peek_arg(sys.argv if argv is None else argv, "--env-file")
+    if explicit is not None:
+        _load_env_file(Path(explicit))
+
     # Peek at the subcommand before parsing so we can re-exec under fakeroot
     # without losing flags or burning argparse on a doomed parse. argv=None
     # means "use sys.argv", which is the normal case where re-exec applies.

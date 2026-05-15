@@ -432,13 +432,13 @@ def run(frag_dir: Path, cfg: HarnessConfig) -> RunResult:
     if not cache.names():
         raise SystemExit(
             f"no fragment .tar.gz files found in {frag_dir}. "
-            "Run `python -m utils.stitch shard <firmware> -o <dir>` first to produce shards."
+            "Run `fwstitch shard <firmware> -o <dir>` first to produce shards."
         )
     if len(cache.names()) == 1:
         print(
             f"WARNING: only one fragment in {frag_dir}: {cache.names()[0]}. "
-            "Stitching may be a no-op. Try `shard --min-score 3` (lower threshold) "
-            "or `shard --extractor binwalk` to capture more fragments.",
+            "Stitching may be a no-op. Try `fwstitch shard --min-score 3` (lower threshold) "
+            "or `fwstitch shard --extractor binwalk` to capture more fragments.",
             file=sys.stderr,
         )
 

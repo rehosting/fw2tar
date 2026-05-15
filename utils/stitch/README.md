@@ -263,12 +263,39 @@ the plan (useful in CI where a human reviews before commit).
 
 All consumed by the `plan` step; CLI flags override.
 
-| Variable           | Meaning                                                    |
-| ------------------ | ---------------------------------------------------------- |
-| `LLM_BASE_URL`  | LLM server endpoint, e.g. `http://localhost:8000/v1`       |
-| `LLM_API_KEY`   | API key; defaults to `"dummy"` since local servers ignore  |
-| `LLM_MODEL`     | Model name, e.g. `gpt-oss-120b`, `gemma3:27b`, `qwen2.5:32b` |
-| `OPENAI_INSECURE`  | `1` to skip TLS verification (same as `-k` / `--insecure`)  |
+| Variable        | Meaning                                                       |
+| --------------- | ------------------------------------------------------------- |
+| `LLM_BASE_URL`  | LLM server endpoint, e.g. `http://localhost:8000/v1`. Omit for OpenAI proper. |
+| `LLM_API_KEY`   | API key; defaults to `"dummy"` since most local servers ignore it |
+| `LLM_MODEL`     | Model name, e.g. `gpt-4o-mini`, `gpt-oss-120b`, `gemma3:27b`, `qwen2.5:32b` |
+| `LLM_INSECURE`  | `1` to skip TLS verification (same as `-k` / `--insecure`)    |
+
+### `.env` files
+
+Both the host wrapper and the in-container Python entry auto-load env files
+when present. Precedence, most-specific wins:
+
+1. process env vars (anything already `export`ed in your shell)
+2. `--env-file PATH` (explicit, on either the wrapper or the Python CLI)
+3. `./.env` (project-local — the directory you invoke from)
+4. `~/.config/fwstitch/.env` (machine-wide defaults)
+
+Format is plain `KEY=VALUE` per line. `#` comments allowed; an optional
+`export ` prefix is accepted; matched surrounding single or double quotes are
+stripped.
+
+```ini
+# ~/.config/fwstitch/.env
+LLM_API_KEY=sk-...
+LLM_MODEL=gpt-4o-mini
+# LLM_BASE_URL omitted -> openai SDK uses api.openai.com by default
+```
+
+Then any plan/all invocation just works:
+
+```bash
+./fwstitch plan ./shards
+```
 
 
 ## File formats
