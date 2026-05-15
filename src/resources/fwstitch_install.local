@@ -1,0 +1,23 @@
+#!/bin/bash
+# Emits a shell script that installs the fwstitch host wrapper to ~/.local/bin.
+# Run as: docker run rehosting/fw2tar fwstitch_install.local | sh
+echo "#!/bin/bash"
+echo "mkdir -p \$HOME/.local/bin"
+# Unique delimiter — the wrapper has an 'EOF' inside its own print_help heredoc.
+echo "cat << '__FWSTITCH_WRAPPER_EOF__' > \$HOME/.local/bin/fwstitch"
+printf "%s" "$(cat /usr/local/src/fwstitch_wrapper)"
+echo
+echo "__FWSTITCH_WRAPPER_EOF__"
+echo "chmod +x \$HOME/.local/bin/fwstitch"
+echo "case \":\$PATH:\" in"
+echo "  *:\"\$HOME/.local/bin\":*) ;;"
+echo "  *) echo 'export PATH=\"\$HOME/.local/bin:\$PATH\"' >> \$HOME/.bashrc ;;"
+echo "esac"
+
+echo 'BOLD=$(tput bold 2>/dev/null || true)'
+echo 'RESET=$(tput sgr0 2>/dev/null || true)'
+
+echo "echo \"\${BOLD}Success!\${RESET} fwstitch installed to ~/.local/bin/fwstitch. If ~/.local/bin wasn't on PATH yet, source ~/.bashrc (or open a new shell) to pick it up.\""
+echo "echo"
+echo "echo \"Try:\""
+echo "echo \"  \${BOLD}fwstitch --wrapper-help\${RESET}\""
