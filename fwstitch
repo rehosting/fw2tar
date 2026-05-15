@@ -20,6 +20,33 @@ image="rehosting/fw2tar"
 verbose=false
 network_host=false
 extra_docker_args=()
+env_file=""
+
+# Load a KEY=VALUE-style .env file. Process env wins over file contents — we
+# only set keys that aren't already in the environment.
+load_env_file() {
+    local f="$1"
+    [[ -f "$f" ]] || return 0
+    while IFS= read -r line || [[ -n "$line" ]]; do
+        # Strip leading whitespace
+        line="${line#"${line%%[![:space:]]*}"}"
+        [[ -z "$line" ]] && continue
+        [[ "${line:0:1}" == "#" ]] && continue
+        # Allow optional `export ` prefix
+        line="${line#export }"
+        if [[ "$line" =~ ^([A-Za-z_][A-Za-z0-9_]*)=(.*)$ ]]; then
+            local k="${BASH_REMATCH[1]}"
+            local v="${BASH_REMATCH[2]}"
+            # Strip surrounding single or double quotes (but only if matched)
+            if [[ ${#v} -ge 2 && "${v:0:1}" == "${v: -1}" && ( "${v:0:1}" == '"' || "${v:0:1}" == "'" ) ]]; then
+                v="${v:1:${#v}-2}"
+            fi
+            if [[ -z "${!k:-}" ]]; then
+                export "$k=$v"
+            fi
+        fi
+    done < "$f"
+}
 
 # Subcommands that need network access for the LLM server.
 needs_network() {
@@ -37,8 +64,13 @@ Wrapper script for running fw2tar's stitcher in a Docker container.
 Wrapper flags (must precede the subcommand):
   --image NAME    image to run (default: $image)
   --network MODE  docker network mode (default: 'host' for plan/all, bridge otherwise)
+  --env-file PATH load env vars from a KEY=VALUE file (process env wins)
   --verbose       print mappings + docker command
   --wrapper-help  this message
+
+.env auto-discovery: ~/.config/fwstitch/.env then ./.env are loaded if present.
+The format is plain KEY=VALUE per line (#-comments and an optional 'export '
+prefix are allowed). Process env vars always win over file contents.
 
 Subcommands (forwarded to fwstitch inside the container):
   shard FIRMWARE -o SHARD_DIR        extract per-fragment .tar.gz + manifest
@@ -60,11 +92,22 @@ while [[ $# -gt 0 ]]; do
         --wrapper-help) print_help; exit 0 ;;
         --image)        image="$2"; shift 2 ;;
         --network)      extra_docker_args+=("--network" "$2"); network_host=true; shift 2 ;;
+        --env-file)     env_file="$2"; shift 2 ;;
         --verbose)      verbose=true; shift ;;
         --)             shift; break ;;
         *)              break ;;
     esac
 done
+
+# Auto-load .env. Each load_env_file only sets keys that aren't already in the
+# environment, so order = precedence: process env > --env-file > ./.env >
+# ~/.config/fwstitch/.env. We feed them most-specific-first so the more
+# specific source wins when it disagrees with a more generic one.
+if [[ -n "$env_file" ]]; then
+    load_env_file "$env_file"
+fi
+load_env_file "./.env"
+load_env_file "${HOME}/.config/fwstitch/.env"
 
 if [[ $# -eq 0 ]]; then
     print_help
