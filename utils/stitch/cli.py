@@ -133,12 +133,22 @@ def _add_llm_args(p: argparse.ArgumentParser) -> None:
     p.add_argument("--model", default=None, help="LLM model name (else $LLM_MODEL)")
     p.add_argument("--base-url", default=None, help="OpenAI-compatible endpoint URL (else $LLM_BASE_URL)")
     p.add_argument("--api-key", default=None, help="API key (else $LLM_API_KEY, defaults to 'dummy')")
-    p.add_argument("--max-turns", type=int, default=10)
+    p.add_argument("--max-turns", type=int, default=15,
+                   help="Maximum LLM-loop iterations (default 15). The harness force-submits "
+                        "on the final turn and grants one bonus turn if validation fails there.")
+    p.add_argument("--backend", default="openai-auto",
+                   choices=["openai-auto", "openai-native", "openai-json"],
+                   help="Which provider adapter to use. Default 'openai-auto' starts in "
+                        "native tool-calling mode and falls back to JSON-emission if the "
+                        "server / model rejects it.")
     p.add_argument("--no-native-tools", action="store_true",
-                   help="Skip native tool-calling, use JSON fallback mode")
+                   help="DEPRECATED: alias for --backend openai-json. Skip native tool-calling.")
     p.add_argument("-k", "--insecure", action="store_true",
                    help="Skip TLS cert verification (for self-signed self-hosted models). "
                         "Also honored via env: LLM_INSECURE=1.")
+    p.add_argument("--debug-transcript", type=Path, default=None,
+                   help="Append every system/user/assistant/tool turn to this file (for "
+                        "diagnosing weak-model behavior).")
 
 
 def _add_apply_args(p: argparse.ArgumentParser) -> None:
@@ -202,18 +212,24 @@ def cmd_shard(args) -> int:
     return 0
 
 
+def _resolve_backend(args) -> str:
+    if args.no_native_tools:
+        return "openai-json"
+    return args.backend
+
+
 def cmd_plan(args) -> int:
     base_url, api_key, model = _resolve_llm_env(args)
     cfg = HarnessConfig(
         base_url=base_url, api_key=api_key, model=model,
-        max_turns=args.max_turns, force_fallback=args.no_native_tools,
+        max_turns=args.max_turns, backend=_resolve_backend(args),
         insecure=_resolve_insecure(args), verbose=args.verbose,
+        debug_transcript=args.debug_transcript,
     )
     result = run(args.shard_dir, cfg)
     plan_out = args.plan_out or (args.shard_dir / "stitch_plan.yaml")
     dump_plan(result.plan, plan_out)
-    print(f"[plan] wrote {plan_out} ({result.turns} turns, "
-          f"{'fallback' if result.used_fallback else 'native'} mode)")
+    print(f"[plan] wrote {plan_out} ({result.turns} turns, backend={result.backend_name})")
     _print_plan_summary(result.plan)
     return 0
 
@@ -250,8 +266,9 @@ def cmd_all(args) -> int:
     base_url, api_key, model = _resolve_llm_env(args)
     cfg = HarnessConfig(
         base_url=base_url, api_key=api_key, model=model,
-        max_turns=args.max_turns, force_fallback=args.no_native_tools,
+        max_turns=args.max_turns, backend=_resolve_backend(args),
         insecure=_resolve_insecure(args), verbose=args.verbose,
+        debug_transcript=args.debug_transcript,
     )
     result = run(args.shard_dir, cfg)
     plan_out = args.shard_dir / "stitch_plan.yaml"
