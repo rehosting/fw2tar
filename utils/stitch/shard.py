@@ -325,11 +325,11 @@ def tar_shards(
     return infos
 
 
-def write_manifest(infos: list[ShardInfo], out_dir: Path, firmware: Path, extractor: str) -> Path:
+def write_manifest(infos: list[ShardInfo], out_dir: Path, firmware: Optional[Path], extractor: str) -> Path:
     manifest_path = out_dir / "shards.json"
     payload = {
-        "firmware": firmware.name,
-        "firmware_stem": firmware.stem,
+        "firmware": firmware.name if firmware is not None else None,
+        "firmware_stem": firmware.stem if firmware is not None else None,
         "extractor": extractor,
         "shards": [asdict(i) for i in infos],
     }
@@ -566,7 +566,7 @@ def run_binwalk(firmware: Path, scratch: Path, verbose: bool = False) -> Path:
 # --------------- Top-level ---------------
 
 def shard(
-    firmware: Path,
+    firmware: Optional[Path],
     out_dir: Path,
     extractor: str = "unblob",
     extracted_dir: Optional[Path] = None,
@@ -576,9 +576,10 @@ def shard(
 ) -> dict:
     """Extract a firmware blob into per-shard .tar.gz files + a manifest.
 
-    If `extracted_dir` is supplied, skip extraction and walk that tree directly
-    — re-extraction (e.g. native cpio for perm preservation) still works as
-    long as the original blobs are still present next to the *_extract dirs.
+    If `extracted_dir` is supplied, `firmware` may be None and the tree is
+    walked directly. Re-extraction (e.g. native cpio for perm preservation)
+    still works as long as the original blobs are present next to the
+    *_extract dirs.
 
     Returns a dict summary suitable for printing.
     """
@@ -593,7 +594,7 @@ def shard(
         scratch_root = Path(tempfile.mkdtemp(prefix="fw2shard_"))
         cleanup_scratch = scratch_root
     else:
-        if not firmware.is_file():
+        if firmware is None or not firmware.is_file():
             raise FileNotFoundError(f"firmware not found: {firmware}")
         scratch_root = Path(tempfile.mkdtemp(prefix="fw2shard_"))
         cleanup_scratch = scratch_root
@@ -605,6 +606,11 @@ def shard(
             raise ValueError(f"unknown extractor: {extractor!r}")
         used_extractor = extractor
 
+    # When --from-extracted was used we may not have a firmware path; pick a
+    # stable stem from the extracted dir name so the per-shard tarball names
+    # are deterministic.
+    firmware_stem = firmware.stem if firmware is not None else extraction_root.resolve().name
+
     try:
         candidates = find_shards(extraction_root, min_score=min_score)
         if verbose:
@@ -613,7 +619,7 @@ def shard(
                 print(f"  score={s:3d}  files={ev.get('file_count')}  "
                       f"{p.relative_to(extraction_root)}", file=sys.stderr)
         infos = tar_shards(
-            candidates, extraction_root, out_dir, firmware.stem,
+            candidates, extraction_root, out_dir, firmware_stem,
             scratch_root=scratch_root, reextract=reextract, verbose=verbose,
         )
         manifest_path = write_manifest(infos, out_dir, firmware, used_extractor)
