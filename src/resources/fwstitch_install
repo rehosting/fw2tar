@@ -1,0 +1,13 @@
+#!/bin/bash
+# Emits a shell script that installs the fwstitch host wrapper system-wide.
+# Run as: docker run rehosting/fw2tar fwstitch_install | sudo sh
+# Use a unique heredoc delimiter — the wrapper itself contains an 'EOF' inside
+# its print_help() heredoc, which would otherwise terminate the outer heredoc
+# early.
+echo "#!/bin/bash"
+echo "cat << '__FWSTITCH_WRAPPER_EOF__' | sudo tee /usr/local/bin/fwstitch >/dev/null"
+printf "%s" "$(cat /usr/local/src/fwstitch_wrapper)"
+echo
+echo "__FWSTITCH_WRAPPER_EOF__"
+echo "sudo chmod +x /usr/local/bin/fwstitch"
+echo "echo \"fwstitch installed successfully to /usr/local/bin/fwstitch\""
