@@ -50,4 +50,11 @@ pub struct Args {
     /// Timeout for extractors, measured in seconds
     #[arg(long, default_value_t = 20)]
     pub timeout: u64,
+    
+
+    // external
+    #[arg(long,short('e'),requires("scratch_dir"))]
+    pub external: Option<Vec<String>>,
+    #[arg(long,short('i'),requires("firmware"))]
+    pub internal: Option<Vec<String>>,
 }
