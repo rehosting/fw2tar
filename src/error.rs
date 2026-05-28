@@ -15,4 +15,7 @@ pub enum Fw2tarError {
 
     #[error("Output file ({0:?}) already exists. Use --force to overwrite.")]
     OutputExists(PathBuf),
+
+    #[error("External mapping failed: {0:?}.")]
+    ExternalFailure(String),
 }

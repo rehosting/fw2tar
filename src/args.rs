@@ -50,4 +50,12 @@ pub struct Args {
     /// Timeout for extractors, measured in seconds
     #[arg(long, default_value_t = 20)]
     pub timeout: u64,
+    
+
+    /// external mount point relative path to scrath directory path:mount_point
+    #[arg(long,short('e'),requires("scratch_dir"))]
+    pub external: Option<Vec<String>>,
+    /// internal mount point search_string:mount_point
+    #[arg(long,short('i'),requires("firmware"))]
+    pub internal: Option<Vec<String>>,
 }

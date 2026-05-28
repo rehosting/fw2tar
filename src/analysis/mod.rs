@@ -1,4 +1,4 @@
-use std::collections::HashSet;
+use std::collections::{BTreeMap, HashSet};
 use std::path::{Path, PathBuf};
 use std::sync::Mutex;
 use std::time::Instant;
@@ -51,17 +51,18 @@ pub fn extract_and_process(
     results: &Mutex<Vec<ExtractionResult>>,
     metadata: &Metadata,
     removed_devices: Option<&Mutex<HashSet<PathBuf>>>,
+    external_paths: Option<&BTreeMap<PathBuf, PathBuf>>,
+    internal_paths: Option<&BTreeMap<PathBuf,String>>,
 ) -> Result<(), ExtractProcessError> {
     let extractor_name = extractor.name();
 
-    let scratch_dir = scratch_dir
+    let origin_dir = scratch_dir
         .map(Path::to_path_buf)
         .unwrap_or_else(env::temp_dir);
-
     let temp_dir_prefix = format!("fw2tar_{extractor_name}");
-    let temp_dir = TempDir::with_prefix_in(temp_dir_prefix, &scratch_dir)
+    let mut temp_dir = TempDir::with_prefix_in(temp_dir_prefix, &origin_dir)
         .map_err(ExtractProcessError::TempDirFail)?;
-
+    temp_dir.disable_cleanup(scratch_dir.is_some());
     let extract_dir = temp_dir.path();
 
     let log_file = {
@@ -84,7 +85,7 @@ pub fn extract_and_process(
         log::info!("{extractor_name} took {elapsed:.2} seconds");
     }
 
-    let rootfs_choices = find_linux_filesystems(extract_dir, None, extractor_name);
+    let rootfs_choices = find_linux_filesystems(extract_dir, None, extractor_name, internal_paths);
 
     if rootfs_choices.is_empty() {
         log::error!("No Linux filesystems found extracting {in_file:?} with {extractor_name}");
@@ -105,9 +106,13 @@ pub fn extract_and_process(
             let file_name = out_file_base.file_name().unwrap().to_string_lossy();
             out_file_base.with_file_name(format!("{}.{extractor_name}.{i}.tar.gz", file_name))
         };
-
+        let combined_paths = if let Some(external) = external_paths {
+            fs.paths.iter().chain(external.iter()).map(|(k,v)| (k.clone(),v.clone())).collect()
+        }else {
+            fs.paths.clone()
+        };
         // XXX: improve error handling here
-        let file_node_count = tar_fs(&fs.path, &tar_path, metadata, removed_devices).unwrap();
+        let file_node_count = tar_fs(&combined_paths, &tar_path, metadata, removed_devices, ).unwrap();
         let archive_hash = sha1_file(&tar_path).unwrap();
 
         results.lock().unwrap().push(ExtractionResult {
@@ -123,7 +128,7 @@ pub fn extract_and_process(
     }
 
     drop(temp_dir);
-
+    
     Ok(())
 }
 
