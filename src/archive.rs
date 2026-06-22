@@ -18,6 +18,13 @@ const FIXED_TIMESTAMP: u64 = 1546318800; // Tue Jan 01 2019 05:00:00 GMT+0000
 static BAD_PREFIXES: &[&str] = &["0.tar", "squashfs-root"];
 static BAD_SUFFIXES: &[&str] = &["_extract", ".uncompressed", ".unknown"];
 
+/// True when a path component looks like an extractor artifact (an intermediate
+/// carve/unpack directory) that should be excluded from the output archive.
+fn is_extraction_artifact(name: &str) -> bool {
+    BAD_PREFIXES.iter().any(|prefix| name.starts_with(prefix))
+        || BAD_SUFFIXES.iter().any(|suffix| name.ends_with(suffix))
+}
+
 fn is_blk_or_chr(meta: fs::Metadata) -> bool {
     meta.file_type().is_block_device() | meta.file_type().is_char_device()
 }
@@ -51,24 +58,8 @@ pub fn tar_fs(
         entry
             .path()
             .file_name()
-            .map(|name| {
-                name.to_str().map(|name| {
-                    for prefix in BAD_PREFIXES {
-                        if name.starts_with(prefix) {
-                            return false;
-                        }
-                    }
-
-                    for suffix in BAD_SUFFIXES {
-                        if name.ends_with(suffix) {
-                            return false;
-                        }
-                    }
-
-                    true
-                })
-            })
-            .flatten()
+            .and_then(|name| name.to_str())
+            .map(|name| !is_extraction_artifact(name))
             .unwrap_or(true)
     };
 
@@ -150,4 +141,33 @@ pub fn tar_fs(
     encoder.write_all(b"made with fw2tar")?;
 
     Ok(tar_entry_count)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::is_extraction_artifact;
+
+    #[test]
+    fn flags_bad_prefixes() {
+        assert!(is_extraction_artifact("0.tar"));
+        assert!(is_extraction_artifact("squashfs-root"));
+        assert!(is_extraction_artifact("squashfs-root-0"));
+    }
+
+    #[test]
+    fn flags_bad_suffixes() {
+        assert!(is_extraction_artifact("firmware.bin_extract"));
+        assert!(is_extraction_artifact("data.uncompressed"));
+        assert!(is_extraction_artifact("blob.unknown"));
+    }
+
+    #[test]
+    fn keeps_real_rootfs_entries() {
+        for name in ["bin", "etc", "usr", "sh", "passwd", "busybox", "libc.so.0"] {
+            assert!(
+                !is_extraction_artifact(name),
+                "{name} should not be treated as an artifact"
+            );
+        }
+    }
 }

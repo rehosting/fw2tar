@@ -90,18 +90,81 @@ pub fn find_linux_filesystems(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::fs;
+    use std::os::unix::fs::PermissionsExt;
+    use tempfile::TempDir;
 
     #[test]
     fn assert_key_dirs_sorted() {
+        // `find_linux_filesystems` relies on simple membership, but keeping the
+        // list sorted makes review/diffs predictable.
         assert!(KEY_DIRS.is_sorted());
     }
 
-    #[test]
-    fn test_walkdir() {
-        for entry in WalkDir::new(".") {
-            let entry = entry.unwrap();
-
-            println!("{}", entry.path().display());
+    /// Build a minimal but convincing Linux rootfs under `root`: every key dir,
+    /// both critical files, and `n_exec` executable files.
+    fn make_rootfs(root: &Path, n_exec: usize) {
+        for dir in KEY_DIRS {
+            fs::create_dir_all(root.join(dir)).unwrap();
         }
+        fs::write(root.join("bin/sh"), b"#!/bin/sh\n").unwrap();
+        fs::write(root.join("etc/passwd"), b"root:x:0:0:root:/root:/bin/sh\n").unwrap();
+
+        for i in 0..n_exec {
+            let path = root.join("bin").join(format!("prog{i}"));
+            fs::write(&path, b"\x7fELF").unwrap();
+            let mut perms = fs::metadata(&path).unwrap().permissions();
+            perms.set_mode(0o755);
+            fs::set_permissions(&path, perms).unwrap();
+        }
+    }
+
+    #[test]
+    fn detects_a_complete_rootfs() {
+        let tmp = TempDir::new().unwrap();
+        make_rootfs(tmp.path(), 5);
+
+        let found = find_linux_filesystems(tmp.path(), Some(3), "test");
+
+        assert_eq!(found.len(), 1, "expected exactly one rootfs");
+        assert_eq!(found[0].path, tmp.path());
+        assert!(found[0].executables >= 5);
+        assert_eq!(found[0].key_file_count, KEY_DIRS.len() + CRITICAL_FILES.len());
+    }
+
+    #[test]
+    fn rejects_rootfs_with_too_few_executables() {
+        let tmp = TempDir::new().unwrap();
+        make_rootfs(tmp.path(), 2);
+
+        // Default threshold (10) should reject a rootfs with only 2 executables.
+        let found = find_linux_filesystems(tmp.path(), None, "test");
+        assert!(found.is_empty(), "should not accept a rootfs below the executable threshold");
+    }
+
+    #[test]
+    fn rejects_directory_missing_key_paths() {
+        let tmp = TempDir::new().unwrap();
+        // Only one key dir present (1 < MIN_REQUIRED): not a rootfs.
+        fs::create_dir_all(tmp.path().join("bin")).unwrap();
+        fs::write(tmp.path().join("bin/sh"), b"x").unwrap();
+
+        let found = find_linux_filesystems(tmp.path(), Some(0), "test");
+        assert!(found.is_empty());
+    }
+
+    #[test]
+    fn ranks_richer_rootfs_first() {
+        let tmp = TempDir::new().unwrap();
+        let small = tmp.path().join("small");
+        let big = tmp.path().join("big");
+        make_rootfs(&small, 4);
+        make_rootfs(&big, 12);
+
+        let found = find_linux_filesystems(tmp.path(), Some(3), "test");
+        assert_eq!(found.len(), 2);
+        // Sorted by (executables, size, key_file_count) descending.
+        assert_eq!(found[0].path, big);
+        assert_eq!(found[1].path, small);
     }
 }

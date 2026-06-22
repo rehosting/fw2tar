@@ -1,0 +1,89 @@
+name: Nightly Regression
+
+# Heavy, network-dependent tests that don't belong on every PR:
+#   - the full behavior matrix (every synthesizable filesystem x every extractor)
+#   - end_to_end.sh: downloads real vendor firmware and diffs against baselines
+on:
+  schedule:
+    - cron: "0 7 * * *"   # 07:00 UTC daily
+  workflow_dispatch: {}
+
+env:
+  REGISTRY: ${{ secrets.REHOSTING_ARC_REGISTRY || 'harbor.harbor.svc.cluster.local' }}
+  USER: ${{ secrets.REHOSTING_ARC_REGISTRY_USER || 'external' }}
+  TARGET: ${{ secrets.REHOSTING_ARC_REGISTRY || 'harbor.harbor.svc.cluster.local/external' }}
+  EXTERNAL_REGISTRY_PASS: ${{ vars.EXTERNAL_REGISTRY_PASS }}
+
+jobs:
+  # Build the current main into Harbor so the test job can pull it by sha.
+  build:
+    uses: rehosting/ci/.github/workflows/build-and-push.yml@v1
+    with:
+      image: rehosting/fw2tar
+    secrets:
+      registry: ${{ secrets.REHOSTING_ARC_REGISTRY }}
+      registry-user: ${{ secrets.REHOSTING_ARC_REGISTRY_USER }}
+      registry-password: ${{ secrets.REHOSTING_ARC_REGISTRY_PASSWORD }}
+
+  tests:
+    needs: build
+    runs-on: rehosting-arc
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Cache firmware downloads
+        uses: actions/cache@v4
+        with:
+          path: tests/tmp_downloads
+          key: firmware-downloads-${{ hashFiles('tests/end_to_end.sh') }}
+          restore-keys: |
+            firmware-downloads-
+
+      - name: Pull built image
+        uses: rehosting/ci/actions/pull-image@v1
+        with:
+          registry: ${{ env.REGISTRY }}
+          target: ${{ env.TARGET }}
+          image: rehosting/fw2tar
+          tag: ${{ github.sha }}
+          local-tag: rehosting/fw2tar:latest
+          username: ${{ env.USER }}
+          password: ${{ secrets.REHOSTING_ARC_REGISTRY_PASSWORD || env.EXTERNAL_REGISTRY_PASS }}
+
+      # Full per-filesystem x per-extractor matrix. Builds the behavior test image
+      # (adds genromfs/genisoimage/zip/... to the base) so romfs/iso/fat/zip/yaffs
+      # are exercised too.
+      - name: Behavior characterization (full matrix)
+        env:
+          FW2TAR_IMAGE: rehosting/fw2tar:latest
+        run: ./tests/behavior/run.sh
+
+      - name: Run end-to-end firmware tests
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          FW2TAR_IMAGE: rehosting/fw2tar:latest
+          CLEANUP_DOWNLOADS: true
+        run: ./tests/end_to_end.sh
+
+      - name: Upload AX1800 Results
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: ax1800_listing.txt
+          path: tests/results/ax1800_listing.txt.new
+
+      - name: Upload RAX545 Results
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: rax54s_listing.txt
+          path: tests/results/rax54s_listing.txt.new
+
+      - name: Upload RAX545 Binwalk Log
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: rax54s_binwalk_log.zip
+          path: tests/tmp_downloads/RAX54Sv2-V1.1.4.28.zip_out/RAX54Sv2-V1.1.4.28.binwalk.log
