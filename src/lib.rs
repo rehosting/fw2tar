@@ -11,7 +11,7 @@ use metadata::Metadata;
 
 use std::cmp::Reverse;
 use std::collections::HashSet;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::sync::Mutex;
 use std::{env, fs, thread};
 
@@ -20,6 +20,25 @@ pub enum BestExtractor {
     Only(&'static str),
     Identical(&'static str),
     None,
+}
+
+/// Derive the default output base from the firmware path by stripping a single
+/// trailing extension (mirrors Python's `Path.stem`). Falls back to the path
+/// unchanged when there is no stem (e.g. dotfiles or a bare path).
+fn default_output_base(firmware: &Path) -> PathBuf {
+    if let Some(stem) = firmware.file_stem() {
+        firmware.with_file_name(stem)
+    } else {
+        firmware.to_path_buf()
+    }
+}
+
+/// Append the `.rootfs.tar.gz` suffix to an output base. Uses `with_file_name`
+/// (string append) rather than `with_extension`, which would greedily strip an
+/// existing dotted segment (e.g. version numbers like `V1.1.4.28`).
+fn rootfs_archive_path(output_base: &Path) -> PathBuf {
+    let file_name = output_base.file_name().unwrap().to_string_lossy();
+    output_base.with_file_name(format!("{}.rootfs.tar.gz", file_name))
 }
 
 pub fn main(args: args::Args) -> Result<(BestExtractor, PathBuf), Fw2tarError> {
@@ -33,21 +52,9 @@ pub fn main(args: args::Args) -> Result<(BestExtractor, PathBuf), Fw2tarError> {
 
     let output = args
         .output
-        .unwrap_or_else(|| {
-            // Use file_stem() which should behave like Python's Path.stem
-            if let Some(stem) = args.firmware.file_stem() {
-                args.firmware.with_file_name(stem)
-            } else {
-                // No stem available, use as-is
-                args.firmware.clone()
-            }
-        });
+        .unwrap_or_else(|| default_output_base(&args.firmware));
 
-    let selected_output_path = {
-        // Simple string append to avoid with_extension() being greedy
-        let file_name = output.file_name().unwrap().to_string_lossy();
-        output.with_file_name(format!("{}.rootfs.tar.gz", file_name))
-    };
+    let selected_output_path = rootfs_archive_path(&output);
 
     if selected_output_path.exists() && !args.force {
         return Err(Fw2tarError::OutputExists(selected_output_path));
@@ -145,4 +152,51 @@ pub fn main(args: args::Args) -> Result<(BestExtractor, PathBuf), Fw2tarError> {
     fs::rename(&best_result.path, &selected_output_path).unwrap();
 
     result
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn default_output_base_strips_single_extension() {
+        assert_eq!(
+            default_output_base(Path::new("/fw/firmware.bin")),
+            PathBuf::from("/fw/firmware")
+        );
+    }
+
+    #[test]
+    fn default_output_base_keeps_inner_dots() {
+        // A single trailing extension is stripped; version dots are preserved.
+        assert_eq!(
+            default_output_base(Path::new("RAX54Sv2-V1.1.4.28.zip")),
+            PathBuf::from("RAX54Sv2-V1.1.4.28")
+        );
+    }
+
+    #[test]
+    fn default_output_base_without_extension_is_unchanged() {
+        assert_eq!(
+            default_output_base(Path::new("/fw/firmware")),
+            PathBuf::from("/fw/firmware")
+        );
+    }
+
+    #[test]
+    fn rootfs_archive_path_appends_suffix_without_greedy_strip() {
+        // The full version string must survive in the archive name.
+        assert_eq!(
+            rootfs_archive_path(Path::new("RAX54Sv2-V1.1.4.28")),
+            PathBuf::from("RAX54Sv2-V1.1.4.28.rootfs.tar.gz")
+        );
+    }
+
+    #[test]
+    fn rootfs_archive_path_preserves_directory() {
+        assert_eq!(
+            rootfs_archive_path(Path::new("/out/dir/firmware")),
+            PathBuf::from("/out/dir/firmware.rootfs.tar.gz")
+        );
+    }
 }
