@@ -38,31 +38,34 @@ FIXTURES=(
     "zip|rootfs.zip"
 )
 
-# Expected outcome category per "<fixture>/<extractor>" cell:
-#   ok    rootfs produced, every entry matches expectations (full fidelity)
-#   diff  rootfs produced but some metadata lost (a known bug)
-#   none  no rootfs produced (extractor can't / metadata lost so it isn't detected)
-#   skip  fixture image could not be built (e.g. yaffs without mkyaffs2image)
+# Expected outcome per "<fixture>/<extractor>" cell:
+#   ok      rootfs produced, every entry matches expectations (full fidelity)
+#   diff:N  rootfs produced but N metadata properties lost (a known bug); the
+#           count is PINNED — both worsening (N grows) and partially fixing it
+#           (N shrinks) trip the gate, so a real fork fix forces a re-baseline
+#           or a promotion to `ok`
+#   none    no rootfs produced (extractor can't / metadata lost so it isn't detected)
+#   skip    fixture image could not be built (e.g. yaffs without mkyaffs2image)
 # Cells with no entry are reported but NOT gated (yaffs is left ungated because its
 # image only builds when mkyaffs2image is present). Captured 2026-06-22 against the
 # Docker image; re-baselined for the Nix image (binwalk v3.1.0 from nixpkgs now
-# extracts cramfs/cpio where the older build produced no rootfs). 2026-06-23: the
-# full matrix (nightly-only) showed unblob/binwalk now extract an iso9660 rootfs
-# (diff: iso9660/Rock Ridge drops suid/sgid/sticky bits and some symlinks); was none.
+# extracts cramfs/cpio where the older build produced no rootfs). 2026-06-23:
+# unblob/binwalk now extract an iso9660 rootfs (Rock Ridge drops suid/sgid/sticky
+# + some symlinks); pinned exact mismatch counts for every known-bug cell.
 declare -A EXPECT=(
     [squashfs/unblob]=ok    [squashfs/binwalk]=ok    [squashfs/binwalkv3]=ok
-    [cramfs/unblob]=ok      [cramfs/binwalk]=ok      [cramfs/binwalkv3]=diff
+    [cramfs/unblob]=ok      [cramfs/binwalk]=ok      [cramfs/binwalkv3]=diff:6
     [ubifs/unblob]=ok       [ubifs/binwalk]=ok       [ubifs/binwalkv3]=none
-    [jffs2/unblob]=diff     [jffs2/binwalk]=diff     [jffs2/binwalkv3]=diff
-    [ext2/unblob]=diff      [ext2/binwalk]=none      [ext2/binwalkv3]=none
-    [ext3/unblob]=diff      [ext3/binwalk]=none      [ext3/binwalkv3]=none
-    [ext4/unblob]=diff      [ext4/binwalk]=none      [ext4/binwalkv3]=none
-    [romfs/unblob]=none     [romfs/binwalk]=none     [romfs/binwalkv3]=diff
-    [iso9660/unblob]=diff   [iso9660/binwalk]=diff   [iso9660/binwalkv3]=none
+    [jffs2/unblob]=diff:3   [jffs2/binwalk]=diff:3   [jffs2/binwalkv3]=diff:3
+    [ext2/unblob]=diff:4    [ext2/binwalk]=none      [ext2/binwalkv3]=none
+    [ext3/unblob]=diff:4    [ext3/binwalk]=none      [ext3/binwalkv3]=none
+    [ext4/unblob]=diff:4    [ext4/binwalk]=none      [ext4/binwalkv3]=none
+    [romfs/unblob]=none     [romfs/binwalk]=none     [romfs/binwalkv3]=diff:23
+    [iso9660/unblob]=diff:6 [iso9660/binwalk]=diff:6 [iso9660/binwalkv3]=none
     [fat/unblob]=none       [fat/binwalk]=none       [fat/binwalkv3]=none
-    [cpio/unblob]=diff      [cpio/binwalk]=ok        [cpio/binwalkv3]=diff
+    [cpio/unblob]=diff:1    [cpio/binwalk]=ok        [cpio/binwalkv3]=diff:6
     [tar/unblob]=ok         [tar/binwalk]=ok         [tar/binwalkv3]=ok
-    [zip/unblob]=diff       [zip/binwalk]=diff       [zip/binwalkv3]=diff
+    [zip/unblob]=diff:6     [zip/binwalk]=diff:4     [zip/binwalkv3]=diff:6
 )
 
 # Optional fixture subset (positional args). Empty => all fixtures.
@@ -151,12 +154,20 @@ echo
 echo "legend: ok=full fidelity  diff:N=rootfs with N metadata mismatches  none=no rootfs  skip=image not built"
 
 # ---- gate against EXPECT (only fixtures that were run) ----
+# Cells expected as a known bug pin the EXACT mismatch count (diff:N): both
+# worsening a bug (diff:3 -> diff:5) and partially fixing one (diff:3 -> diff:1)
+# trip the gate, forcing a re-baseline or a fixture promotion to golden. Cells
+# expected ok/none/skip are matched by category (the count is irrelevant there).
 category() { case "$1" in diff:*) echo diff ;; *) echo "$1" ;; esac; }
 failures=0
 for key in "${!EXPECT[@]}"; do
     want_fixture "${key%%/*}" || continue
     want="${EXPECT[$key]}"
-    got="$(category "${CELL[$key]:-MISSING}")"
+    raw="${CELL[$key]:-MISSING}"
+    case "$want" in
+        diff:*) got="$raw" ;;                  # exact mismatch count required
+        *)      got="$(category "$raw")" ;;    # ok / none / skip: category only
+    esac
     if [ "$got" != "$want" ]; then
         echo -e "${RED}REGRESSION $key: expected $want, got ${CELL[$key]:-MISSING}${END}"
         failures=$((failures+1))
