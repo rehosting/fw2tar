@@ -27,10 +27,10 @@ jobs:
 
       - name: Require Cachix token
         env:
-          CACHIX_AUTH_TOKEN: ${{ secrets.CACHIX_AUTH_TOKEN }}
+          CACHIX_REHOSTING: ${{ secrets.CACHIX_REHOSTING }}
         run: |
-          [ -n "$CACHIX_AUTH_TOKEN" ] || {
-            echo "::error::CACHIX_AUTH_TOKEN is not set; Nix builds would run uncached"; exit 1; }
+          [ -n "$CACHIX_REHOSTING" ] || {
+            echo "::error::CACHIX_REHOSTING secret is not set; Nix builds would run uncached"; exit 1; }
 
       - name: Set up Nix
         uses: rehosting/ci/actions/nix-setup@v1
@@ -38,7 +38,7 @@ jobs:
           github-token: ${{ secrets.GITHUB_TOKEN }}
           cache-backend: cachix
           cachix-name: rehosting-tools
-          cachix-auth-token: ${{ secrets.CACHIX_AUTH_TOKEN }}
+          cachix-auth-token: ${{ secrets.CACHIX_REHOSTING }}
 
       - name: Cache firmware downloads
         uses: actions/cache@v4
