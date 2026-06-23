@@ -77,3 +77,11 @@ jobs:
           NO_BUILD: "1"
           TEST_IMAGE: rehosting/fw2tar-test:latest
         run: ./tests/behavior/run.sh squashfs cramfs ubifs jffs2 ext2 ext3 ext4 cpio tar
+      # Container interface parity: default command (banner), the command
+      # install scripts, and the fakeroot_fw2tar entry point. The test image is
+      # a superset of the production image, so its interface is identical.
+      - name: Container interface (default cmd / install / fw2tar script)
+        env:
+          NO_BUILD: "1"
+          FW2TAR_IMAGE: rehosting/fw2tar-test:latest
+        run: ./tests/container/run.sh
