@@ -39,6 +39,9 @@ jobs:
       image: rehosting/fw2tar
       flake-attr: .#dockerImage
       cachix-name: rehosting-tools
+      # No VM needed; avoids install-nix-action's KVM/udevadm step that fails
+      # on Arc pods which expose /dev/kvm without a working udevd.
+      enable-kvm: false
       dockerhub-user: rehosting
       extra-tags: |
         rehosting/fw2tar:${{ needs.version.outputs.v }}
