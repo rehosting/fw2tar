@@ -49,7 +49,7 @@ jobs:
       registry-user: ${{ secrets.REHOSTING_ARC_REGISTRY_USER }}
       registry-password: ${{ secrets.REHOSTING_ARC_REGISTRY_PASSWORD }}
       dockerhub-token: ${{ secrets.DOCKERHUB_TOKEN }}
-      cachix-auth-token: ${{ secrets.CACHIX_AUTH_TOKEN }}
+      cachix-auth-token: ${{ secrets.CACHIX_REHOSTING }}
 
   # 3. Cut the GitHub release (after the image exists).
   release:
