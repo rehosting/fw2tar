@@ -20,7 +20,7 @@ where altering file ownership or permissions could undermine the integrity of an
 
 ## Key Features
 
-- **Unprivileged Extraction**: Runs with standard user privileges in an unpriviliged docker or singularity container.
+- **Unprivileged Extraction**: Runs with standard user privileges in an unprivileged docker container.
 - **Permission Preservation**: Maintains correct filesystem permissions, facilitating accurate dynamic analysis.
 - **Root Filesystem Extraction**: Instead of producing every extracted file, `fw2tar` identifies and outputs archives for each identified (Linux) root filesystem.
 - **Multiple Extractors**: Filesystems can be extracted using `unblob`, `binwalk`, or both.
@@ -79,34 +79,6 @@ Replace `/path/to/your/firmware.bin` with the actual path to your firmware file:
 ```
 
 The resulting filesystem(s) will be output to `/path/to/your/firmware.{binwalk,unblob}.*.tar.gz`, with each root filesystem extracted to its own archive.
-
-### Singularity
-
-#### Build the Container
-
-On a system where you have root permissions, clone this repository and
-then build `fw2tar.sif` using `./build_singularity.sh`, or manually with:
-
-```sh
-docker build -t rehosting/fw2tar:latest .
-docker run -v /var/run/docker.sock:/var/run/docker.sock \
-    -v $(pwd):/output \
-    --privileged -t \
-    --rm quay.io/singularity/docker2singularity:v3.9.0 rehsoting/fw2tar
-mv fw2tar*.sif fw2tar.sif
-```
-
-#### Run the Container
-
-```sh
-export INPUT_FILE=/path/to/your/firmware.bin
-singularity exec \
-    -B $(dirname $INPUT_FILE):/host \
-    fw2tar.sif \
-    fakeroot_fw2tar /host/$(basename $INPUT_FILE)
-```
-
-Your filesystem(s) will be output to `/path/to/your/firmware.{binwalk,unblob}.tar.gz`.
 
 ## Comparing Filesystem Archives
 
