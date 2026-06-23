@@ -136,11 +136,28 @@
               ${pythonEnv}/bin/python3 -m stitch "$@"
           '';
 
+          # Container UX entry points, byte-for-byte from src/resources (mirrors
+          # the Dockerfile). `banner.sh` is the default CMD and prints install
+          # instructions; the *_install[.local] scripts emit installer shell
+          # scripts the user pipes to `sh`/`sudo sh` on the host to drop the
+          # `fw2tar`/`fwstitch` host wrappers onto their PATH. They read the
+          # wrapper sources from /usr/local/src (created in extraCommands).
+          containerTools = pkgs.runCommand "fw2tar-container-tools" { } ''
+            mkdir -p $out/bin
+            cp ${./src/resources/banner.sh}            $out/bin/banner.sh
+            cp ${./src/resources/fw2tar_install}       $out/bin/fw2tar_install
+            cp ${./src/resources/fw2tar_install.local} $out/bin/fw2tar_install.local
+            cp ${./src/resources/fwstitch_install}       $out/bin/fwstitch_install
+            cp ${./src/resources/fwstitch_install.local} $out/bin/fwstitch_install.local
+            chmod +x $out/bin/*
+          '';
+
           imageContents =
             [
               fw2tar
               fakerootFw2tar
               fwstitch
+              containerTools
               unblobPkg
               binwalkV3
               pythonEnv
@@ -149,6 +166,8 @@
               pkgs.coreutils
               pkgs.findutils
               pkgs.gnugrep
+              # tput, used by banner.sh / the host wrappers when on a terminal.
+              pkgs.ncurses
               # /etc/passwd + /etc/group with a root entry: binwalk v2 calls
               # pwd.getpwuid(os.getuid()), which fails on the otherwise
               # password-file-less minimal image. Extraction runs under
@@ -165,10 +184,20 @@
             # Many scripts use a `#!/usr/bin/env ...` shebang; the minimal image
             # only has /bin/env (from coreutils), so provide the usual path too.
             mkdir -p usr/bin && ln -sf /bin/env usr/bin/env
+            # Host-wrapper sources the *_install scripts embed and copy out.
+            # (Dockerfile: COPY ./fw2tar /usr/local/src/fw2tar_wrapper, etc.)
+            mkdir -p usr/local/src
+            cp ${./fw2tar}   usr/local/src/fw2tar_wrapper
+            cp ${./fwstitch} usr/local/src/fwstitch_wrapper
+            # Print the install banner on interactive shells (Dockerfile parity).
+            mkdir -p etc
+            printf '%s\n' '[ ! -z "$TERM" ] && [ -z "$NOBANNER" ] && banner.sh' >> etc/bash.bashrc
           '';
 
           imageConfig = {
-            Cmd = [ "${pkgs.bashInteractive}/bin/bash" ];
+            # Default command: print install instructions (Dockerfile parity).
+            # `docker run -it <img> bash` still drops to a shell.
+            Cmd = [ "/bin/banner.sh" ];
             Env = [
               "PATH=/bin"
               "HOME=/root"

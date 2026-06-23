@@ -72,6 +72,14 @@ jobs:
           TEST_IMAGE: rehosting/fw2tar-test:latest
         run: ./tests/behavior/run.sh
 
+      # Container interface parity against the *production* image: default
+      # command (banner), the command install scripts, and fakeroot_fw2tar.
+      - name: Container interface (production image)
+        env:
+          NO_BUILD: "1"
+          FW2TAR_IMAGE: rehosting/fw2tar:latest
+        run: ./tests/container/run.sh
+
       - name: Run end-to-end firmware tests
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
