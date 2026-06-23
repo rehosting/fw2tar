@@ -5,7 +5,7 @@
     nixpkgs.url = "github:NixOS/nixpkgs/nixpkgs-unstable";
 
     # The rehosting forks. Pinned by flake.lock to exact revisions.
-    unblob.url = "github:rehosting/unblob/update-upstream-26.6.4";
+    unblob.url = "github:rehosting/unblob";
 
     binwalk-v2 = {
       url = "github:rehosting/binwalk";

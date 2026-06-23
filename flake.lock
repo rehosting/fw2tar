@@ -118,7 +118,6 @@
       },
       "original": {
         "owner": "rehosting",
-        "ref": "update-upstream-26.6.4",
         "repo": "unblob",
         "type": "github"
       }
