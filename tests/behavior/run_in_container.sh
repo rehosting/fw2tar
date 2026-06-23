@@ -46,7 +46,9 @@ FIXTURES=(
 # Cells with no entry are reported but NOT gated (yaffs is left ungated because its
 # image only builds when mkyaffs2image is present). Captured 2026-06-22 against the
 # Docker image; re-baselined for the Nix image (binwalk v3.1.0 from nixpkgs now
-# extracts cramfs/cpio where the older build produced no rootfs).
+# extracts cramfs/cpio where the older build produced no rootfs). 2026-06-23: the
+# full matrix (nightly-only) showed unblob/binwalk now extract an iso9660 rootfs
+# (diff: iso9660/Rock Ridge drops suid/sgid/sticky bits and some symlinks); was none.
 declare -A EXPECT=(
     [squashfs/unblob]=ok    [squashfs/binwalk]=ok    [squashfs/binwalkv3]=ok
     [cramfs/unblob]=ok      [cramfs/binwalk]=ok      [cramfs/binwalkv3]=diff
@@ -56,7 +58,7 @@ declare -A EXPECT=(
     [ext3/unblob]=diff      [ext3/binwalk]=none      [ext3/binwalkv3]=none
     [ext4/unblob]=diff      [ext4/binwalk]=none      [ext4/binwalkv3]=none
     [romfs/unblob]=none     [romfs/binwalk]=none     [romfs/binwalkv3]=diff
-    [iso9660/unblob]=none   [iso9660/binwalk]=none   [iso9660/binwalkv3]=none
+    [iso9660/unblob]=diff   [iso9660/binwalk]=diff   [iso9660/binwalkv3]=none
     [fat/unblob]=none       [fat/binwalk]=none       [fat/binwalkv3]=none
     [cpio/unblob]=diff      [cpio/binwalk]=ok        [cpio/binwalkv3]=diff
     [tar/unblob]=ok         [tar/binwalk]=ok         [tar/binwalkv3]=ok
