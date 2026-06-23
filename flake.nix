@@ -44,8 +44,9 @@
           # files and the tests fail. unblob's suite is validated in its own CI /
           # a `nix build` from an LFS checkout; for the image we only need the
           # built package.
-          unblobPkg = unblob.packages.${system}.default.overrideAttrs (_: {
+          unblobPkg = unblob.packages.${system}.default.overridePythonAttrs (_: {
             doCheck = false;
+            doInstallCheck = false;
           });
 
           # binwalk v2 (2.3.3) still uses the `imp` module, removed in Python
@@ -135,47 +136,81 @@
               ${pythonEnv}/bin/python3 -m stitch "$@"
           '';
 
+          imageContents =
+            [
+              fw2tar
+              fakerootFw2tar
+              fwstitch
+              unblobPkg
+              binwalkV3
+              pythonEnv
+              pkgs.fakeroot
+              pkgs.bashInteractive
+              pkgs.coreutils
+              pkgs.findutils
+              pkgs.gnugrep
+              # /etc/passwd + /etc/group with a root entry: binwalk v2 calls
+              # pwd.getpwuid(os.getuid()), which fails on the otherwise
+              # password-file-less minimal image. Extraction runs under
+              # fakeroot (uid 0), so the root entry is what gets looked up.
+              pkgs.dockerTools.fakeNss
+            ]
+            ++ extractionTools;
+
+          # The minimal image ships no /tmp; fw2tar (and the extractors) need a
+          # writable temp + HOME for scratch extraction and tool config.
+          imageExtraCommands = ''
+            mkdir -p tmp && chmod 1777 tmp
+            mkdir -p root && chmod 0777 root
+            # Many scripts use a `#!/usr/bin/env ...` shebang; the minimal image
+            # only has /bin/env (from coreutils), so provide the usual path too.
+            mkdir -p usr/bin && ln -sf /bin/env usr/bin/env
+          '';
+
+          imageConfig = {
+            Cmd = [ "${pkgs.bashInteractive}/bin/bash" ];
+            Env = [
+              "PATH=/bin"
+              "HOME=/root"
+              "TMPDIR=/tmp"
+              "LC_ALL=C.UTF-8"
+              "LANG=C.UTF-8"
+              "FW2TAR_LOG=warn"
+            ];
+          };
+
           dockerImage = pkgs.dockerTools.buildLayeredImage {
             name = "rehosting/fw2tar";
             tag = "latest";
+            contents = imageContents;
+            extraCommands = imageExtraCommands;
+            config = imageConfig;
+          };
 
-            contents =
-              [
-                fw2tar
-                fakerootFw2tar
-                fwstitch
-                unblobPkg
-                binwalkV3
-                pythonEnv
-                pkgs.fakeroot
-                pkgs.bashInteractive
-                pkgs.coreutils
-                # /etc/passwd + /etc/group with a root entry: binwalk v2 calls
-                # pwd.getpwuid(os.getuid()), which fails on the otherwise
-                # password-file-less minimal image. Extraction runs under
-                # fakeroot (uid 0), so the root entry is what gets looked up.
-                pkgs.dockerTools.fakeNss
-              ]
-              ++ extractionTools;
+          # Filesystem *builders* the behaviour harness uses to synthesise
+          # fixtures (the apt equivalents the tests/behavior/Dockerfile installs).
+          # The base image already carries the mkfs tools for
+          # ext*/squashfs/cramfs/jffs2/ubifs via extractionTools.
+          fixtureBuilders = with pkgs; [
+            genromfs
+            cdrkit # genisoimage
+            mtools
+            dosfstools
+            ntfs3g
+            zip
+            util-linux # mkfs.cramfs (fixture builder; distinct from cramfsck)
+            # (mkyaffs2image / yaffs2utils is not in nixpkgs; yaffs stays a
+            # documented skip in the harness's EXPECT table, same as before.)
+          ];
 
-            # The minimal image ships no /tmp; fw2tar (and the extractors) need a
-            # writable temp + HOME for scratch extraction and tool config.
-            extraCommands = ''
-              mkdir -p tmp && chmod 1777 tmp
-              mkdir -p root && chmod 0777 root
-            '';
-
-            config = {
-              Cmd = [ "${pkgs.bashInteractive}/bin/bash" ];
-              Env = [
-                "PATH=/bin"
-                "HOME=/root"
-                "TMPDIR=/tmp"
-                "LC_ALL=C.UTF-8"
-                "LANG=C.UTF-8"
-                "FW2TAR_LOG=warn"
-              ];
-            };
+          # The fw2tar image plus fixture builders, so the behaviour harness can
+          # run end-to-end in one Nix-built image (no apt layer needed).
+          testImage = pkgs.dockerTools.buildLayeredImage {
+            name = "rehosting/fw2tar-test";
+            tag = "latest";
+            contents = imageContents ++ fixtureBuilders;
+            extraCommands = imageExtraCommands;
+            config = imageConfig;
           };
         in
         {
@@ -183,6 +218,7 @@
             fw2tar
             binwalk2
             dockerImage
+            testImage
             ;
           default = fw2tar;
         }
