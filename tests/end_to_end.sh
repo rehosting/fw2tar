@@ -290,6 +290,15 @@ download_file "https://dl.google.com/dl/edgedl/chromeos/recovery/chromeos_9334.4
 # "no extractor succeeded" when a runner is slow.
 test "$FIRMWARE_PATH" "google_wifi" "Google WiFi" "unblob,binwalk" 360
 
+# Download TP-Link TL-WR841N (EU) V14 — regression guard for issue #35
+# (this image stopped extracting after f44361d4; the unblob 26.6.4 rebase
+# restored it — a real busybox rootfs with all key dirs/critical files).
+FIRMWARE_PATH="$TMP_DIR/tl_wr841n.zip"
+
+download_file "https://static.tp-link.com/2018/201804/20180403/TL-WR841N(EU)_V14_180319.zip" "$FIRMWARE_PATH"
+
+test "$FIRMWARE_PATH" "tl_wr841n" "TL-WR841N" "unblob,binwalk"
+
 # Download NETGEAR AX5400 (RAX54S) firmware
 FIRMWARE_PATH="$TMP_DIR/RAX54Sv2-V1.1.4.28.zip"
 
