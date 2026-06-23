@@ -56,6 +56,6 @@ pub struct Args {
     #[arg(long,short('e'),requires("scratch_dir"))]
     pub external: Option<Vec<String>>,
     /// internal mount point search_string:mount_point
-    #[arg(long,short('i'),requires("firmware"))]
+    #[arg(long,short('i'),requires("firmware"),requires("extractors"))]
     pub internal: Option<Vec<String>>,
 }
