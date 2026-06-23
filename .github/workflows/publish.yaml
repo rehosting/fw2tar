@@ -42,9 +42,9 @@ jobs:
       # No VM needed; avoids install-nix-action's KVM/udevadm step that fails
       # on Arc pods which expose /dev/kvm without a working udevd.
       enable-kvm: false
-      # CACHIX_REHOSTING is pull-only by design, so don't attempt the post-step
-      # Cachix push (it would 403). The build still pulls from the cache.
-      cachix-skip-push: "true"
+      # This is a non-PR (main/dispatch) build, so nix-setup pushes the built
+      # paths to Cachix (rehosting-tools) to populate the cache. PR builds
+      # auto-skip the push.
       dockerhub-user: rehosting
       extra-tags: |
         rehosting/fw2tar:${{ needs.version.outputs.v }}
