@@ -20,7 +20,6 @@ fw2tar_run() {
     local cmd=()
     local maps=()
     local build=false
-    local singularity=false
     local verbose=false
     local image="rehosting/fw2tar" # Name of container instance
 
@@ -32,8 +31,7 @@ fw2tar_run() {
                 echo "Wrapper script for running FW2TAR in a Docker container"
                 echo ""
                 echo "Wrapper-specific flags may be passed in *before* the fw2tar flags and args. If a value is required, it must be specified immediately after the flag with a space."
-                echo "  --build: Build the fw2tar container before running the specified command. If no other arguments are provided, the container will be built and the script will exit."
-                echo "  --build-singularity: Build the fw2tar container as a sif."
+                echo "  --build: Build the fw2tar container (with Nix) before running the specified command. If no other arguments are provided, the container will be built and the script will exit."
                 echo "  --image: Which image to run. Default: $image"
                 echo "  --verbose: Print verbose output for fw2tar wrapper (e.g., filesystem mappings, docker command)"
                 echo "  --wrapper-help: this message"
@@ -46,11 +44,6 @@ fw2tar_run() {
                 ;;
             --build)
                 build=true
-                shift
-                ;;
-            --build-singularity)
-                build=true
-                singularity=true
                 shift
                 ;;
             --image)
@@ -84,36 +77,19 @@ fw2tar_run() {
     fi
 
     if $build; then
-        echo "Running with container build (--build). Entire container will be rebuilt and tagged as $image."
-        # Make sure we have Dockerfile and directory is namedfw2tar 
-        if [ ! -f "Dockerfile" ]; then
-            echo "Dockerfile not found in current directory and you requested a container rebuild"
+        echo "Running with container build (--build). The image is built with Nix and loaded as $image."
+        # The image is produced by this repo's flake (flake.nix), not a
+        # Dockerfile. Build it and load the resulting tarball into Docker.
+        if [ ! -f "flake.nix" ]; then
+            echo "flake.nix not found in current directory; run --build from the fw2tar repo."
             exit 1
         fi
-        # Check if current directory is named fw2tar
-        if [ ! "$(basename "$(pwd)")" == "fw2tar" ]; then
-            echo "Current directory is not named fw2tar but you requested a container rebuild"
+        if ! command -v nix >/dev/null 2>&1; then
+            echo "nix not found; install Nix (https://nixos.org/download) to build the fw2tar image."
             exit 1
         fi
-
-        if [ ! -z "${SSH_AUTH_SOCK+x}" ]; then
-            # Build with ssh
-            DOCKER_BUILDKIT=1 docker build --build-arg SSH=1 --ssh default -t $image .
-        else
-            DOCKER_BUILDKIT=1 docker build -t $image .
-        fi
-
-        # --build-singularity
-        if $singularity; then
-            docker run -v /var/run/docker.sock:/var/run/docker.sock \
-                -v $(pwd):/output \
-                --privileged -t \
-                --rm quay.io/singularity/docker2singularity:v3.9.0 rehosting/fw2tar
-            mv rehosting_fw2tar*.sif fw2tar.sif
-
-            echo "$image built. Exiting."
-            exit 0
-        fi
+        nix build .#dockerImage || { echo "nix build .#dockerImage failed"; exit 1; }
+        docker load < result || { echo "docker load failed"; exit 1; }
 
         # If we have no other args, exit 0
         if [[ ${#cmd[@]} -eq 0 ]]; then
