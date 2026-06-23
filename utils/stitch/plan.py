@@ -14,6 +14,7 @@ import gzip
 import hashlib
 import json
 import posixpath
+import struct
 import sys
 import tarfile
 from pathlib import Path
@@ -158,25 +159,31 @@ def apply_plan(
                     seen[new_name] = frag.source
                     members_written += 1
 
-    # fw2tar metadata trailer — see show_metadata.py and src/archive.rs. The
-    # trailer lives in the *decompressed* gzip view, after the tar EOF blocks.
-    # gzip supports multi-member concatenation, so we append a second gzip
-    # member that decompresses to: 16 nulls + json + "made with fw2tar".
-    metadata = {
+    # fw2tar manifest trailer — see show_metadata.py and src/archive.rs
+    # (write_manifest_trailer). The trailer lives in the *decompressed* gzip
+    # view, after the tar EOF blocks; gzip supports multi-member concatenation,
+    # so we append a second gzip member containing it. Framing (last in stream):
+    #   [ manifest JSON ][ u32 LE len(JSON) ][ u16 LE frame version ][ 16-byte magic ]
+    manifest = {
+        "version": 1,
         "file": str(out_path.name),
-        "fw2tar_command": "stitch (fw2tar.utils.stitch)",
+        "fw2tar_command": ["stitch (fw2tar.utils.stitch)"],
         "input_hash": plan_hash(plan),
+        "extractor": "stitch",
+        "devices": [],
+        # stitch-specific extras (readers ignore unknown keys):
         "stitched_from": [f.source for f in plan.fragments],
         "stitch_plan_confidence": plan.confidence,
     }
-    # Note the "\n" separator: show_metadata.py does string.split("\n") to split
-    # the json blob from the magic. archive.rs omits it (latent inconsistency
-    # between fw2tar and its own utility); we match show_metadata.py here so the
-    # existing tool keeps working on stitched outputs.
+    manifest_json = json.dumps(manifest).encode()
+    trailer = (
+        manifest_json
+        + struct.pack("<I", len(manifest_json))
+        + struct.pack("<H", 1)
+        + b"made with fw2tar"
+    )
     with open(tmp_path, "ab") as f, gzip.GzipFile(fileobj=f, mode="wb") as g:
-        g.write(b"\x00" * 0x10)
-        g.write(json.dumps(metadata).encode())
-        g.write(b"\nmade with fw2tar")
+        g.write(trailer)
 
     tmp_path.rename(out_path)
 

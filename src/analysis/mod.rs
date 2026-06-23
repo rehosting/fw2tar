@@ -1,4 +1,3 @@
-use std::collections::HashSet;
 use std::path::{Path, PathBuf};
 use std::sync::Mutex;
 use std::time::Instant;
@@ -13,7 +12,7 @@ pub mod find_linux_filesystems;
 
 use crate::archive::tar_fs;
 use crate::extractors::{ExtractError, Extractor};
-use crate::metadata::Metadata;
+use crate::metadata::{Manifest, Metadata};
 use find_linux_filesystems::find_linux_filesystems;
 
 #[derive(Debug, Clone)]
@@ -26,6 +25,10 @@ pub struct ExtractionResult {
     pub archive_hash: String,
     pub file_node_count: usize,
     pub path: PathBuf,
+    /// The manifest embedded in this archive's trailer (input metadata,
+    /// extractor, stripped device nodes). Re-emitted as the sidecar for the
+    /// winning result.
+    pub manifest: Manifest,
 }
 
 #[derive(Error, Debug)]
@@ -50,7 +53,6 @@ pub fn extract_and_process(
     _secondary_limit: usize,
     results: &Mutex<Vec<ExtractionResult>>,
     metadata: &Metadata,
-    removed_devices: Option<&Mutex<HashSet<PathBuf>>>,
 ) -> Result<(), ExtractProcessError> {
     let extractor_name = extractor.name();
 
@@ -107,7 +109,8 @@ pub fn extract_and_process(
         };
 
         // XXX: improve error handling here
-        let file_node_count = tar_fs(&fs.path, &tar_path, metadata, removed_devices).unwrap();
+        let (file_node_count, manifest) =
+            tar_fs(&fs.path, &tar_path, metadata, extractor_name).unwrap();
         let archive_hash = sha1_file(&tar_path).unwrap();
 
         results.lock().unwrap().push(ExtractionResult {
@@ -119,6 +122,7 @@ pub fn extract_and_process(
             archive_hash,
             file_node_count,
             path: tar_path,
+            manifest,
         });
     }
 
