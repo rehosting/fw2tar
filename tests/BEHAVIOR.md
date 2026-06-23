@@ -45,7 +45,7 @@ docker, not host tooling.
 | jffs2 | `jefferson` | **loses directory modes** | `mkfs.jffs2` | ⚠️ known-bug |
 | extfs (ext2/3/4) | `debugfs -R rdump` | **loses special bits** | `mke2fs -d` | ⚠️ known-bug |
 | romfs | `RomfsExtractor` | keeps symlinks, **loses exec bits** | `genromfs -d` | ⛔ no-rootfs |
-| iso9660 | `7z` | **loses exec bits + symlinks** | `genisoimage -R` | ⛔ no-rootfs |
+| iso9660 | Rock Ridge | base modes + exec bits; **loses suid/sgid/sticky + some symlinks** | `genisoimage -R` | ⚠️ diff |
 | fat | `7z` | none (no unix metadata) | `mkfs.vfat`+`mcopy` | ⛔ no-rootfs |
 | yaffs | `unyaffs` / `yaffshiv` | (patch `f4b92c90`, unverified) | `mkyaffs2image` (best-effort build) | gap (skipped) |
 | ntfs | `7z` | n/a (ACLs, not unix) | — (`mkntfs` needs root/`ntfscp` to populate) | gap |
@@ -78,7 +78,7 @@ ext3       diff:4       none         none
 ext4       diff:4       none         none
 romfs      none         none         diff:23
 yaffs      skip         skip         skip
-iso9660    none         none         none
+iso9660    diff:6       diff:6       none
 fat        none         none         none
 cpio       diff:1       ok           none
 tar        ok           ok           ok
@@ -104,7 +104,7 @@ zip        diff:4       diff:4       diff:4
   (`opt/sticky 1777 → 1755`, i.e. loses the group/other write bits while keeping
   sticky); binwalkv3 doesn't handle cpio.
 - **zip** (`7z` path) loses special bits everywhere (`busybox 4755→755`, sgid/sticky
-  dropped) but unlike fat/iso it *is* detected as a rootfs, because 7z does restore base
+  dropped) but unlike fat it *is* detected as a rootfs, because 7z does restore base
   modes + exec bits from zip's stored attributes — only the high bits are lost.
 
 The ext4-vs-romfs split (and cpio's unblob-vs-binwalk split) is concrete evidence for
@@ -121,7 +121,8 @@ across all types.
 | **jffs2** | (all) jefferson | ✓ (files) | ✓ (files) | **✗ reset to 0755** | ✓ |
 | **ext2/3/4** | unblob (debugfs) | ✓ | **✗ dropped** | ✓ | ✓ |
 | **romfs** | binwalkv3 | ✗ | ✗ | ✗ | (varies) |
-| **iso9660 / fat** | — (none) | ✗ | ✗ | ✗ | ✗ |
+| **iso9660** | unblob/binwalk (Rock Ridge) | ✓ | **✗ dropped** | ✓ | ✓ |
+| **fat** | — (none) | ✗ | ✗ | ✗ | ✗ |
 | **tar** | any | ✓ | ✓ | ✓ | ✓ |
 | **cpio** | binwalk | ✓ | ✓ | ✓ (unblob loses 1 bit) | ✓ |
 | **zip** | 7z | ✓ | **✗ dropped** | ✓ | ✓ |
@@ -138,12 +139,18 @@ across all types.
   `opt/sticky 1777 → 755`, and crucially restrictive dirs like `var 0700 → 755`. This
   was **discovered by the harness** and is not yet a filed issue — worth one.
 
-- **7z-extracted filesystems (fat, iso9660, ntfs) lose unix metadata wholesale.** `7z`
-  does not restore Rock Ridge / unix perms; symlinks come out as empty files and exec
+- **7z-extracted filesystems (fat, ntfs) lose unix metadata wholesale.** `7z`
+  does not restore unix perms; symlinks come out as empty files and exec
   bits are lost — so badly that `find_linux_filesystems` doesn't even recognize the tree
   as a rootfs (`<10` executables) and **no archive is produced**. Encoded as `no-rootfs`.
   This is the same class of problem that motivated moving cramfs off `7z` (fork commit
   `2342bb54`).
+
+- **iso9660 now extracts as a rootfs (diff).** Unlike fat/ntfs, the iso9660 path
+  restores Rock Ridge base modes + exec bits, so the tree *is* recognized as a rootfs
+  (like zip); only the special bits (`busybox 4755→755`, sgid/sticky) and some symlinks
+  (`usr/bin/sh` comes out as a file; absolute targets rewritten) are lost. Encoded as
+  `diff` for unblob/binwalk; binwalkv3 still produces no rootfs.
 
 - **romfs (`RomfsExtractor`) loses execute bits.** Symlinks survive with correct targets,
   but no file comes out executable, so — like the 7z types — the tree fails rootfs
