@@ -189,20 +189,21 @@ hiding them — while still catching any silent change in either direction.
 
 ## Running it
 
-The harness runs entirely inside a test image, so the host only needs **docker**.
+The harness runs entirely inside the Nix test image, so the host needs **docker**
+and **nix**.
 
 ```sh
 cd tests/behavior
-./run.sh                  # build test image, run all fixtures
+./run.sh                  # nix build .#testImage, run all fixtures
 ./run.sh squashfs ext4    # a subset
 KEEP_WORK=1 ./run.sh      # keep .work/ (images, logs, output) for inspection
-NO_BUILD=1 ./run.sh       # reuse an already-built test image
-FW2TAR_IMAGE=rehosting/fw2tar:mytag ./run.sh   # extend a specific base image
+# reuse an already-loaded image (e.g. built once in CI):
+NO_BUILD=1 TEST_IMAGE=rehosting/fw2tar-test:latest ./run.sh
 ```
 
 Pieces:
-- `Dockerfile` — test image: fw2tar + the extra filesystem builders.
-- `run.sh` — host entry: builds the test image, then runs the driver inside it.
+- `.#testImage` (flake output) — test image: fw2tar + the extra filesystem builders.
+- `run.sh` — host entry: builds the test image with nix, then runs the driver inside it.
 - `run_in_container.sh` — in-container driver: build rootfs → build images →
   `fakeroot_fw2tar` per fixture → check. Holds the fixture list + classifications.
 - `build_rootfs.py` — builds the canonical rootfs + `expected.json` (the oracle).

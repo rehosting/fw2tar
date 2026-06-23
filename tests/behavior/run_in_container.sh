@@ -1,6 +1,7 @@
 #!/bin/bash
 # In-container driver for the behavior harness. Runs INSIDE the fw2tar test image
-# (see Dockerfile), where both the fixture builders and the fw2tar binary live.
+# (the .#testImage flake output), where both the fixture builders and the fw2tar
+# binary live.
 #
 # Builds the canonical rootfs, packs it into every supported filesystem image, then
 # extracts each image with EVERY extractor (unblob, binwalk, binwalkv3) and records

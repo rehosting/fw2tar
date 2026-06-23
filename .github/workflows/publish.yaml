@@ -30,23 +30,26 @@ jobs:
         with:
           use_api: true
 
-  # 2. Build + push to Harbor (:sha) AND Docker Hub (:version/:latest/:sha) via the
-  #    shared org workflow.
+  # 2. Build the Nix image and push to Harbor (:sha) AND Docker Hub
+  #    (:version/:latest/:sha) via the shared org Nix workflow.
   build:
     needs: version
-    uses: rehosting/ci/.github/workflows/build-and-push.yml@v1
+    uses: rehosting/ci/.github/workflows/nix-image-push.yml@v1
     with:
       image: rehosting/fw2tar
+      flake-attr: .#dockerImage
+      cachix-name: rehosting-tools
+      dockerhub-user: rehosting
       extra-tags: |
         rehosting/fw2tar:${{ needs.version.outputs.v }}
         rehosting/fw2tar:latest
         rehosting/fw2tar:${{ github.sha }}
-      dockerhub-user: rehosting
     secrets:
       registry: ${{ secrets.REHOSTING_ARC_REGISTRY }}
       registry-user: ${{ secrets.REHOSTING_ARC_REGISTRY_USER }}
       registry-password: ${{ secrets.REHOSTING_ARC_REGISTRY_PASSWORD }}
       dockerhub-token: ${{ secrets.DOCKERHUB_TOKEN }}
+      cachix-auth-token: ${{ secrets.CACHIX_AUTH_TOKEN }}
 
   # 3. Cut the GitHub release (after the image exists).
   release:

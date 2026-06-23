@@ -5,14 +5,6 @@ on:
     branches:
       - main
 
-# Registry fallback ladder (shared org pattern): real Harbor secrets on internal
-# PRs, public-proxy + read-only "external" creds on forks.
-env:
-  REGISTRY: ${{ secrets.REHOSTING_ARC_REGISTRY || 'harbor.harbor.svc.cluster.local' }}
-  USER: ${{ secrets.REHOSTING_ARC_REGISTRY_USER || 'external' }}
-  TARGET: ${{ secrets.REHOSTING_ARC_REGISTRY || 'harbor.harbor.svc.cluster.local/external' }}
-  EXTERNAL_REGISTRY_PASS: ${{ vars.EXTERNAL_REGISTRY_PASS }}
-
 jobs:
   # Fast, deterministic, no image needed — the cheap per-PR guard.
   unit-tests:
@@ -23,37 +15,49 @@ jobs:
       - name: cargo test
         run: cargo test --locked
 
-  # Build + push the image to Harbor via the shared org workflow (folds in the
-  # cert/buildx/login + registry cache plumbing every repo used to copy-paste).
+  # Validate that the Nix image (fw2tar + unblob + binwalk v2/v3 + extractor
+  # toolchain) builds — but do not push per-PR images to Harbor. Pushing happens
+  # on main via publish.yaml. push:false also lets fork PRs (no secrets) build.
   build:
-    uses: rehosting/ci/.github/workflows/build-and-push.yml@v1
+    uses: rehosting/ci/.github/workflows/nix-image-push.yml@v1
     with:
       image: rehosting/fw2tar
+      flake-attr: .#dockerImage
+      push: false
+      cachix-name: rehosting-tools
     secrets:
       registry: ${{ secrets.REHOSTING_ARC_REGISTRY }}
       registry-user: ${{ secrets.REHOSTING_ARC_REGISTRY_USER }}
       registry-password: ${{ secrets.REHOSTING_ARC_REGISTRY_PASSWORD }}
+      cachix-auth-token: ${{ secrets.CACHIX_AUTH_TOKEN }}
 
   # Deterministic permission-fidelity matrix on synthetic filesystems (no firmware
-  # downloads). Pulls the just-built image and runs the "core" types; the full
-  # matrix (romfs/iso/fat/zip/yaffs + extra builders) runs nightly.
+  # downloads). Builds the Nix *test* image (fw2tar image + fixture builders) and
+  # runs the "core" types; the full matrix runs nightly.
   behavior:
-    needs: build
     runs-on: rehosting-arc
+    env:
+      USER: runner
+      LOGNAME: runner
+      TMPDIR: /home/runner/_work/_temp
+      XDG_CACHE_HOME: /home/runner/_work/.cache
     steps:
       - uses: actions/checkout@v4
-      - name: Pull built image
-        uses: rehosting/ci/actions/pull-image@v1
+      - name: Prepare runner directories
+        run: mkdir -p "$TMPDIR" "$XDG_CACHE_HOME"
+      - name: Set up Nix
+        uses: rehosting/ci/actions/nix-setup@v1
         with:
-          registry: ${{ env.REGISTRY }}
-          target: ${{ env.TARGET }}
-          image: rehosting/fw2tar
-          tag: ${{ github.sha }}
-          local-tag: rehosting/fw2tar:latest
-          username: ${{ env.USER }}
-          password: ${{ secrets.REHOSTING_ARC_REGISTRY_PASSWORD || env.EXTERNAL_REGISTRY_PASS }}
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+          cache-backend: cachix
+          cachix-name: rehosting-tools
+          cachix-auth-token: ${{ secrets.CACHIX_AUTH_TOKEN }}
+      - name: Build Nix test image
+        run: nix build -L .#testImage
+      - name: Load test image
+        run: docker load < result
       - name: Behavior characterization (core types, synthetic fixtures)
         env:
           NO_BUILD: "1"
-          TEST_IMAGE: rehosting/fw2tar:latest
+          TEST_IMAGE: rehosting/fw2tar-test:latest
         run: ./tests/behavior/run.sh squashfs cramfs ubifs jffs2 ext2 ext3 ext4 cpio tar
