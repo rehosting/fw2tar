@@ -83,6 +83,13 @@ if docker run --rm "$IMAGE" fakeroot_fw2tar --help >/dev/null 2>&1; then
 else
     bad "fakeroot_fw2tar --help failed"
 fi
+# fwstitch is the in-container shim (python3 -m stitch); --help must import its
+# deps (openai/pydantic/pyyaml) and the stitch package successfully.
+if docker run --rm "$IMAGE" fwstitch --help >/dev/null 2>&1; then
+    ok "fwstitch --help exits 0"
+else
+    bad "fwstitch --help failed (stitch import / deps?)"
+fi
 
 # ---------------------------------------------------------------------------
 echo "[3] command install emits installers that match the repo wrappers"

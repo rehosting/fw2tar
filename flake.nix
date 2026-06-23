@@ -61,9 +61,26 @@
           # binwalk v3 (Rust) owns the `binwalk` binary.
           binwalkV3 = pkgs.binwalk;
 
-          # Python interpreter fw2tar uses for `python3 -m binwalk` (v2) and
-          # `python3 -m stitch` (fwstitch). stitch is pure-stdlib.
+          # Python interpreter for `python3 -m binwalk` (v2). binwalk v2 is the
+          # binwalk2 module and is pinned to <=3.11 (it imports `imp`).
           pythonEnv = binwalkPython.withPackages (ps: [ binwalk2 ]);
+
+          # fwstitch (the LLM-driven multi-fs stitcher) runs on its own env: it
+          # needs openai/pydantic/pyyaml (utils/stitch/requirements.txt), which
+          # don't build on 3.11 (a doc dep needs >=3.12), so use the default
+          # python3 here rather than binwalk's pinned 3.11.
+          stitchEnv = pkgs.python3.withPackages (ps: [
+            ps.openai
+            ps.pydantic
+            ps.pyyaml
+          ]);
+
+          # The `stitch` package, scoped so PYTHONPATH=${stitchPath} makes
+          # `python3 -m stitch` importable (the dir must *contain* `stitch/`).
+          stitchPath = lib.fileset.toSource {
+            root = ./utils;
+            fileset = ./utils/stitch;
+          };
 
           fw2tar = pkgs.rustPlatform.buildRustPackage {
             pname = "fw2tar";
@@ -132,8 +149,8 @@
           '';
 
           fwstitch = pkgs.writeShellScriptBin "fwstitch" ''
-            exec env PYTHONPATH="${./utils/stitch}''${PYTHONPATH:+:$PYTHONPATH}" \
-              ${pythonEnv}/bin/python3 -m stitch "$@"
+            exec env PYTHONPATH="${stitchPath}''${PYTHONPATH:+:$PYTHONPATH}" \
+              ${stitchEnv}/bin/python3 -m stitch "$@"
           '';
 
           # Container UX entry points, byte-for-byte from src/resources (mirrors
@@ -205,6 +222,7 @@
               "LC_ALL=C.UTF-8"
               "LANG=C.UTF-8"
               "FW2TAR_LOG=warn"
+              "FW2TAR_LOG_STYLE=always"
             ];
           };
 
