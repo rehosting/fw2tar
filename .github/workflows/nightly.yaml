@@ -3,14 +3,54 @@ name: Nightly Regression
 # Heavy, network-dependent tests that don't belong on every PR:
 #   - the full behavior matrix (every synthesizable filesystem x every extractor)
 #   - end_to_end.sh: downloads real vendor firmware and diffs against baselines
-# Both images are built locally with Nix; nothing is pushed.
+# Both images are built locally with Nix; no images are pushed to registries
+# (the Nix store is pushed to Cachix to populate the cache).
 on:
   schedule:
     - cron: "0 7 * * *"   # 07:00 UTC daily
   workflow_dispatch: {}
 
 jobs:
+  # Don't burn compute on the heavy job when nothing shipped: on the scheduled
+  # run, only proceed if a release was published since the previous scheduled
+  # nightly. Manual dispatch always runs (you triggered it on purpose).
+  gate:
+    runs-on: ubuntu-latest
+    outputs:
+      should_run: ${{ steps.check.outputs.should_run }}
+    steps:
+      - id: check
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          REPO: ${{ github.repository }}
+        run: |
+          set -euo pipefail
+          if [ "${{ github.event_name }}" != "schedule" ]; then
+            echo "Manual/${{ github.event_name }} trigger -> run."
+            echo "should_run=true" >> "$GITHUB_OUTPUT"; exit 0
+          fi
+          # Latest published (non-draft) release.
+          rel="$(gh api "repos/$REPO/releases/latest" --jq '.published_at' 2>/dev/null || true)"
+          # Start time of the previous *completed* scheduled nightly (this run is
+          # in_progress, so it's excluded).
+          prev="$(gh api "repos/$REPO/actions/workflows/nightly.yaml/runs?event=schedule&status=completed&per_page=1" \
+                    --jq '.workflow_runs[0].created_at' 2>/dev/null || true)"
+          echo "latest release: ${rel:-<none>} | previous nightly: ${prev:-<none>}"
+          if [ -z "$rel" ] || [ -z "$prev" ]; then
+            echo "No release or no prior nightly -> run (be safe)."
+            echo "should_run=true" >> "$GITHUB_OUTPUT"; exit 0
+          fi
+          if [ "$(date -d "$rel" +%s)" -gt "$(date -d "$prev" +%s)" ]; then
+            echo "Release is newer than last nightly -> run."
+            echo "should_run=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "No new release since last nightly -> skip the heavy job."
+            echo "should_run=false" >> "$GITHUB_OUTPUT"
+          fi
+
   tests:
+    needs: gate
+    if: ${{ needs.gate.outputs.should_run == 'true' }}
     runs-on: rehosting-arc
     env:
       USER: runner
