@@ -43,10 +43,12 @@ FIXTURES=(
 #   none  no rootfs produced (extractor can't / metadata lost so it isn't detected)
 #   skip  fixture image could not be built (e.g. yaffs without mkyaffs2image)
 # Cells with no entry are reported but NOT gated (yaffs is left ungated because its
-# image only builds when mkyaffs2image is present). Captured 2026-06-22.
+# image only builds when mkyaffs2image is present). Captured 2026-06-22 against the
+# Docker image; re-baselined for the Nix image (binwalk v3.1.0 from nixpkgs now
+# extracts cramfs/cpio where the older build produced no rootfs).
 declare -A EXPECT=(
     [squashfs/unblob]=ok    [squashfs/binwalk]=ok    [squashfs/binwalkv3]=ok
-    [cramfs/unblob]=ok      [cramfs/binwalk]=ok      [cramfs/binwalkv3]=none
+    [cramfs/unblob]=ok      [cramfs/binwalk]=ok      [cramfs/binwalkv3]=diff
     [ubifs/unblob]=ok       [ubifs/binwalk]=ok       [ubifs/binwalkv3]=none
     [jffs2/unblob]=diff     [jffs2/binwalk]=diff     [jffs2/binwalkv3]=diff
     [ext2/unblob]=diff      [ext2/binwalk]=none      [ext2/binwalkv3]=none
@@ -55,7 +57,7 @@ declare -A EXPECT=(
     [romfs/unblob]=none     [romfs/binwalk]=none     [romfs/binwalkv3]=diff
     [iso9660/unblob]=none   [iso9660/binwalk]=none   [iso9660/binwalkv3]=none
     [fat/unblob]=none       [fat/binwalk]=none       [fat/binwalkv3]=none
-    [cpio/unblob]=diff      [cpio/binwalk]=ok        [cpio/binwalkv3]=none
+    [cpio/unblob]=diff      [cpio/binwalk]=ok        [cpio/binwalkv3]=diff
     [tar/unblob]=ok         [tar/binwalk]=ok         [tar/binwalkv3]=ok
     [zip/unblob]=diff       [zip/binwalk]=diff       [zip/binwalkv3]=diff
 )
