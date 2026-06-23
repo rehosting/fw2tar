@@ -22,7 +22,8 @@ impl Extractor for UnblobExtractor {
             .arg(extract_dir)
             .arg("--log")
             .arg(log_file)
-            .args(&["--entropy-depth", "1"])
+            // unblob renamed --entropy-depth to --randomness-depth in 26.x
+            .args(&["--randomness-depth", "1"])
             .output()?;
 
         self.cmd_output_to_result(output, false, verbose)
