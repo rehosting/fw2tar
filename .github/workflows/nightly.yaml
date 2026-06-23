@@ -39,6 +39,9 @@ jobs:
           cache-backend: cachix
           cachix-name: rehosting-tools
           cachix-auth-token: ${{ secrets.CACHIX_REHOSTING }}
+          # No VM needed; avoids the KVM/udevadm step that fails on Arc pods
+          # which expose /dev/kvm without a working udevd.
+          enable-kvm: false
 
       - name: Cache firmware downloads
         uses: actions/cache@v4

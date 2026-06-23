@@ -25,6 +25,9 @@ jobs:
       flake-attr: .#dockerImage
       push: false
       cachix-name: rehosting-tools
+      # No VM needed; avoids install-nix-action's KVM/udevadm step that fails
+      # on Arc pods which expose /dev/kvm without a working udevd.
+      enable-kvm: false
     secrets:
       registry: ${{ secrets.REHOSTING_ARC_REGISTRY }}
       registry-user: ${{ secrets.REHOSTING_ARC_REGISTRY_USER }}
@@ -62,6 +65,9 @@ jobs:
           cache-backend: cachix
           cachix-name: rehosting-tools
           cachix-auth-token: ${{ secrets.CACHIX_REHOSTING }}
+          # No VM needed; avoids the KVM/udevadm step that fails on Arc pods
+          # which expose /dev/kvm without a working udevd.
+          enable-kvm: false
       - name: Build Nix test image
         run: nix build -L .#testImage
       - name: Load test image
