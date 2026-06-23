@@ -42,9 +42,8 @@ jobs:
           # No VM needed; avoids the KVM/udevadm step that fails on Arc pods
           # which expose /dev/kvm without a working udevd.
           enable-kvm: false
-          # CACHIX_REHOSTING is pull-only; don't attempt the post-step push
-          # (it would 403). Pulls from the cache still work.
-          skip-push: "true"
+          # Nightly runs on schedule/dispatch (non-PR), so nix-setup pushes the
+          # built paths to Cachix (rehosting-tools) to populate the cache.
 
       - name: Cache firmware downloads
         uses: actions/cache@v4
