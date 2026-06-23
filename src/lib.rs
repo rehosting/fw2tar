@@ -7,10 +7,9 @@ pub mod metadata;
 
 use analysis::{extract_and_process, ExtractionResult};
 pub use error::Fw2tarError;
-use metadata::Metadata;
+use metadata::{Manifest, Metadata};
 
 use std::cmp::Reverse;
-use std::collections::HashSet;
 use std::path::{Path, PathBuf};
 use std::sync::Mutex;
 use std::{env, fs, thread};
@@ -79,9 +78,6 @@ pub fn main(args: args::Args) -> Result<(BestExtractor, PathBuf), Fw2tarError> {
 
     let results: Mutex<Vec<ExtractionResult>> = Mutex::new(Vec::new());
 
-    let removed_devices: Option<Mutex<HashSet<PathBuf>>> =
-        args.log_devices.then(|| Mutex::new(HashSet::new()));
-
     thread::scope(|threads| -> Result<(), Fw2tarError> {
         for extractor_name in extractors {
             let extractor = extractors::get_extractor(&extractor_name)
@@ -98,7 +94,6 @@ pub fn main(args: args::Args) -> Result<(BestExtractor, PathBuf), Fw2tarError> {
                     args.secondary_limit,
                     &results,
                     &metadata,
-                    removed_devices.as_ref(),
                 ) {
                     log::info!("{} error: {e}", extractor.name());
                 }
@@ -108,50 +103,64 @@ pub fn main(args: args::Args) -> Result<(BestExtractor, PathBuf), Fw2tarError> {
         Ok(())
     })?;
 
-    if let Some(removed_devices) = removed_devices {
-        let mut removed_devices = removed_devices
-            .into_inner()
-            .unwrap()
-            .into_iter()
-            .map(|path| path.to_string_lossy().into_owned())
-            .collect::<Vec<_>>();
-
-        removed_devices.sort();
-
-        if removed_devices.is_empty() {
-            log::warn!("No device files were found during extraction, skipping writing log");
-        } else {
-            let devices_log_path = {
-                // Simple string append to avoid with_extension() being greedy
-                let file_name = output.file_name().unwrap().to_string_lossy();
-                output.with_file_name(format!("{}.devices.log", file_name))
-            };
-            fs::write(
-                devices_log_path,
-                removed_devices.join("\n"),
-            )
-            .unwrap();
-        }
-    }
-
     let results = results.lock().unwrap();
     let mut best_results: Vec<_> = results.iter().filter(|&res| res.index == 0).collect();
 
     let result = if best_results.is_empty() {
         return Ok((BestExtractor::None, selected_output_path));
     } else if best_results.len() == 1 {
-        Ok((BestExtractor::Only(best_results[0].extractor), selected_output_path.clone()))
+        Ok((
+            BestExtractor::Only(best_results[0].extractor),
+            selected_output_path.clone(),
+        ))
     } else {
         best_results.sort_by_key(|res| Reverse((res.file_node_count, res.extractor == "unblob")));
 
-        Ok((BestExtractor::Best(best_results[0].extractor), selected_output_path.clone()))
+        Ok((
+            BestExtractor::Best(best_results[0].extractor),
+            selected_output_path.clone(),
+        ))
     };
 
     let best_result = best_results[0];
 
     fs::rename(&best_result.path, &selected_output_path).unwrap();
 
+    write_manifest_sidecar(&best_result.manifest, &selected_output_path);
+
     result
+}
+
+/// Write the chosen archive's manifest as a standalone `<archive>.manifest.json`
+/// sidecar (the same content embedded in the archive's gzip trailer), and warn
+/// about any device nodes that were stripped so the loss is never silent. The
+/// sidecar is best-effort: a failure to write it is logged, not fatal.
+fn write_manifest_sidecar(manifest: &Manifest, output: &Path) {
+    if !manifest.devices.is_empty() {
+        let in_dev = manifest
+            .devices
+            .iter()
+            .filter(|d| d.path.starts_with("/dev/"))
+            .count();
+        log::warn!(
+            "stripped {} device node(s) from the rootfs ({in_dev} under /dev) — see {}.manifest.json",
+            manifest.devices.len(),
+            output.display()
+        );
+    }
+
+    let sidecar_path = {
+        // Simple string append to avoid with_extension() being greedy.
+        let file_name = output.file_name().unwrap().to_string_lossy();
+        output.with_file_name(format!("{file_name}.manifest.json"))
+    };
+    match serde_json::to_vec_pretty(manifest) {
+        Ok(bytes) => match fs::write(&sidecar_path, bytes) {
+            Ok(()) => log::info!("wrote manifest sidecar {sidecar_path:?}"),
+            Err(e) => log::warn!("failed to write manifest sidecar {sidecar_path:?}: {e}"),
+        },
+        Err(e) => log::warn!("failed to serialize manifest: {e}"),
+    }
 }
 
 #[cfg(test)]
