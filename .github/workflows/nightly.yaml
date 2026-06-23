@@ -3,35 +3,35 @@ name: Nightly Regression
 # Heavy, network-dependent tests that don't belong on every PR:
 #   - the full behavior matrix (every synthesizable filesystem x every extractor)
 #   - end_to_end.sh: downloads real vendor firmware and diffs against baselines
+# Both images are built locally with Nix; nothing is pushed.
 on:
   schedule:
     - cron: "0 7 * * *"   # 07:00 UTC daily
   workflow_dispatch: {}
 
-env:
-  REGISTRY: ${{ secrets.REHOSTING_ARC_REGISTRY || 'harbor.harbor.svc.cluster.local' }}
-  USER: ${{ secrets.REHOSTING_ARC_REGISTRY_USER || 'external' }}
-  TARGET: ${{ secrets.REHOSTING_ARC_REGISTRY || 'harbor.harbor.svc.cluster.local/external' }}
-  EXTERNAL_REGISTRY_PASS: ${{ vars.EXTERNAL_REGISTRY_PASS }}
-
 jobs:
-  # Build the current main into Harbor so the test job can pull it by sha.
-  build:
-    uses: rehosting/ci/.github/workflows/build-and-push.yml@v1
-    with:
-      image: rehosting/fw2tar
-    secrets:
-      registry: ${{ secrets.REHOSTING_ARC_REGISTRY }}
-      registry-user: ${{ secrets.REHOSTING_ARC_REGISTRY_USER }}
-      registry-password: ${{ secrets.REHOSTING_ARC_REGISTRY_PASSWORD }}
-
   tests:
-    needs: build
     runs-on: rehosting-arc
+    env:
+      USER: runner
+      LOGNAME: runner
+      TMPDIR: /home/runner/_work/_temp
+      XDG_CACHE_HOME: /home/runner/_work/.cache
     steps:
       - uses: actions/checkout@v4
         with:
           fetch-depth: 0
+
+      - name: Prepare runner directories
+        run: mkdir -p "$TMPDIR" "$XDG_CACHE_HOME"
+
+      - name: Set up Nix
+        uses: rehosting/ci/actions/nix-setup@v1
+        with:
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+          cache-backend: cachix
+          cachix-name: rehosting-tools
+          cachix-auth-token: ${{ secrets.CACHIX_AUTH_TOKEN }}
 
       - name: Cache firmware downloads
         uses: actions/cache@v4
@@ -41,23 +41,22 @@ jobs:
           restore-keys: |
             firmware-downloads-
 
-      - name: Pull built image
-        uses: rehosting/ci/actions/pull-image@v1
-        with:
-          registry: ${{ env.REGISTRY }}
-          target: ${{ env.TARGET }}
-          image: rehosting/fw2tar
-          tag: ${{ github.sha }}
-          local-tag: rehosting/fw2tar:latest
-          username: ${{ env.USER }}
-          password: ${{ secrets.REHOSTING_ARC_REGISTRY_PASSWORD || env.EXTERNAL_REGISTRY_PASS }}
+      - name: Build + load production image
+        run: |
+          nix build -L .#dockerImage
+          docker load < result
 
-      # Full per-filesystem x per-extractor matrix. Builds the behavior test image
-      # (adds genromfs/genisoimage/zip/... to the base) so romfs/iso/fat/zip/yaffs
-      # are exercised too.
+      - name: Build + load test image (fixture builders)
+        run: |
+          nix build -L .#testImage
+          docker load < result
+
+      # Full per-filesystem x per-extractor matrix against the test image
+      # (romfs/iso/fat/zip exercised too; yaffs stays a documented skip).
       - name: Behavior characterization (full matrix)
         env:
-          FW2TAR_IMAGE: rehosting/fw2tar:latest
+          NO_BUILD: "1"
+          TEST_IMAGE: rehosting/fw2tar-test:latest
         run: ./tests/behavior/run.sh
 
       - name: Run end-to-end firmware tests
