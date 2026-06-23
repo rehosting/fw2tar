@@ -41,6 +41,7 @@ test() {
     FIRMWARE_BASENAME=$2
     FIRMWARE_NAME=$3
     EXTRACTORS=$4
+    TIMEOUT=${5:-120}   # per-extractor timeout (s); large images need more
 
     OLD_JSON="$SCRIPT_DIR/results/${FIRMWARE_BASENAME}.json.old"
     NEW_JSON="$SCRIPT_DIR/results/${FIRMWARE_BASENAME}.json.new"
@@ -65,7 +66,7 @@ test() {
     echo "Input file exists: $([ -f "$FIRMWARE_PATH" ] && echo "YES" || echo "NO")"
     echo "Input file size: $([ -f "$FIRMWARE_PATH" ] && ls -lh "$FIRMWARE_PATH" | awk '{print $5}' || echo "N/A")"
 
-    "$SCRIPT_DIR"/../fw2tar --image "${FW2TAR_IMAGE}" --output "$FIRMWARE_PATH_OUT" --extractors "$EXTRACTORS" --timeout 120 --force "$FIRMWARE_PATH"
+    "$SCRIPT_DIR"/../fw2tar --image "${FW2TAR_IMAGE}" --output "$FIRMWARE_PATH_OUT" --extractors "$EXTRACTORS" --timeout "$TIMEOUT" --force "$FIRMWARE_PATH"
 
     # Debug: List what files were actually created
     if $DEBUG; then
@@ -284,7 +285,10 @@ FIRMWARE_PATH="$TMP_DIR/google_wifi.zip"
 
 download_file "https://dl.google.com/dl/edgedl/chromeos/recovery/chromeos_9334.41.3_gale_recovery_stable-channel_mp.bin.zip" "$FIRMWARE_PATH"
 
-test "$FIRMWARE_PATH" "google_wifi" "Google WiFi" "unblob,binwalk"
+# Google WiFi is a large (~68 MB) ChromeOS image; unblob (the chosen extractor)
+# can need well over the default 120s, so give it more headroom to avoid a flaky
+# "no extractor succeeded" when a runner is slow.
+test "$FIRMWARE_PATH" "google_wifi" "Google WiFi" "unblob,binwalk" 360
 
 # Download NETGEAR AX5400 (RAX54S) firmware
 FIRMWARE_PATH="$TMP_DIR/RAX54Sv2-V1.1.4.28.zip"
