@@ -70,7 +70,7 @@ extractor**. This is the gated matrix (`run_in_container.sh`):
 ```
 fixture    unblob       binwalk      binwalkv3
 squashfs   ok           ok           ok
-cramfs     ok           ok           none
+cramfs     ok           ok           diff:6
 ubifs      ok           ok           none
 jffs2      diff:3       diff:3       diff:3
 ext2       diff:4       none         none
@@ -80,19 +80,21 @@ romfs      none         none         diff:23
 yaffs      skip         skip         skip
 iso9660    diff:6       diff:6       none
 fat        none         none         none
-cpio       diff:1       ok           none
+cpio       diff:1       ok           diff:6
 tar        ok           ok           ok
-zip        diff:4       diff:4       diff:4
+zip        diff:6       diff:4       diff:6
 ```
 
 `ok` = full fidelity · `diff:N` = rootfs produced but N metadata mismatches ·
 `none` = no rootfs produced · `skip` = fixture image not built (no builder).
+Each `diff:N` count is **pinned** by the gate (see "Gate", below).
 
 ### Cross-extractor findings
 
 - **squashfs** is the only type all three extractors handle perfectly.
-- **cramfs and ubifs**: full fidelity under unblob *and* binwalk, but **binwalkv3
-  doesn't extract them at all** (`none`).
+- **cramfs and ubifs**: full fidelity under unblob *and* binwalk. binwalkv3 now
+  extracts cramfs but loses metadata (`diff:6`), and still doesn't extract ubifs
+  at all (`none`).
 - **ext2/3/4**: **only unblob** produces a rootfs (and it drops special bits);
   binwalk/binwalkv3 produce nothing detectable.
 - **romfs**: the mirror image — **only binwalkv3** produces a rootfs (with heavy perm
@@ -179,14 +181,16 @@ across all types.
 
 ## Testing model
 
-The harness records an outcome **category** for every `fixture × extractor` cell and
-gates it against the `EXPECT` table in `run_in_container.sh`:
+The harness records an outcome for every `fixture × extractor` cell and gates it
+against the `EXPECT` table in `run_in_container.sh`:
 
 - `ok` — rootfs produced, every entry matches (full fidelity). A cell that drops from
   `ok` is a real regression.
-- `diff` — rootfs produced but some metadata lost (a current bug). When a fix lands the
-  cell flips `diff → ok`; the gate then fails until you update `EXPECT`, which is the
-  signal to record the win.
+- `diff:N` — rootfs produced but N metadata properties lost (a current bug). The count
+  is **pinned exactly**: both worsening a bug (`diff:3 → diff:5`) and partially fixing
+  one (`diff:3 → diff:1`) fail the gate, as does a full fix (`diff → ok`). Any of these
+  is the signal to update `EXPECT` — either re-baselining the count or promoting the
+  cell to `ok`.
 - `none` — no rootfs produced (extractor can't handle the type, or loses so much that
   detection fails). A cell moving `none → diff/ok` means new coverage — update `EXPECT`.
 - `skip` — fixture image couldn't be built (left ungated).
