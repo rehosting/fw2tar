@@ -25,6 +25,13 @@ jobs:
       - name: Prepare runner directories
         run: mkdir -p "$TMPDIR" "$XDG_CACHE_HOME"
 
+      - name: Require Cachix token
+        env:
+          CACHIX_AUTH_TOKEN: ${{ secrets.CACHIX_AUTH_TOKEN }}
+        run: |
+          [ -n "$CACHIX_AUTH_TOKEN" ] || {
+            echo "::error::CACHIX_AUTH_TOKEN is not set; Nix builds would run uncached"; exit 1; }
+
       - name: Set up Nix
         uses: rehosting/ci/actions/nix-setup@v1
         with:
