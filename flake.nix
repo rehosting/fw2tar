@@ -259,6 +259,27 @@
             extraCommands = imageExtraCommands;
             config = imageConfig;
           };
+          # The complete firmware-extraction toolset as one symlinked env, for
+          # downstream flakes (e.g. penguin) that co-locate extraction in their
+          # own image rather than shelling out to the fw2tar container. Same
+          # components as the image's runtime contents, minus the container-UX
+          # entry points (banner/install scripts).
+          extractionBundle = pkgs.buildEnv {
+            name = "fw2tar-extraction-bundle";
+            # unblob's runtimeDeps and extractionTools both carry cramfsprogs (at
+            # slightly different revs); the image tolerates this via dockerTools
+            # layering, so mirror that here rather than failing the env.
+            ignoreCollisions = true;
+            paths = [
+              fw2tar
+              fakerootFw2tar
+              fwstitch
+              unblobPkg
+              binwalkV3
+              pythonEnv
+              pkgs.fakeroot
+            ] ++ extractionTools;
+          };
         in
         {
           inherit
@@ -266,6 +287,7 @@
             binwalk2
             dockerImage
             testImage
+            extractionBundle
             ;
           default = fw2tar;
         }
