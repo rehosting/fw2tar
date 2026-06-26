@@ -41,6 +41,12 @@ pub enum ExtractProcessError {
 
     #[error("Failed to find any filesystems in the extracted contents")]
     FailToFind,
+
+    #[error("Failed to write tar archive ({0})")]
+    TarFail(io::Error),
+
+    #[error("Failed to hash tar archive ({0})")]
+    HashFail(io::Error),
 }
 
 pub fn extract_and_process(
@@ -50,7 +56,6 @@ pub fn extract_and_process(
     scratch_dir: Option<&Path>,
     verbose: bool,
     primary_limit: usize,
-    _secondary_limit: usize,
     results: &Mutex<Vec<ExtractionResult>>,
     metadata: &Metadata,
 ) -> Result<(), ExtractProcessError> {
@@ -66,11 +71,7 @@ pub fn extract_and_process(
 
     let extract_dir = temp_dir.path();
 
-    let log_file = {
-        // Simple string append to avoid with_extension() being greedy
-        let file_name = out_file_base.file_name().unwrap().to_string_lossy();
-        out_file_base.with_file_name(format!("{}.{extractor_name}.log", file_name))
-    };
+    let log_file = extractor_log_path(out_file_base, extractor_name);
 
     let start_time = Instant::now();
 
@@ -79,25 +80,26 @@ pub fn extract_and_process(
         .map_err(ExtractProcessError::ExtractFail)?;
 
     let elapsed = start_time.elapsed().as_secs_f32();
-
-    if verbose {
-        println!("{extractor_name} took {elapsed:.2} seconds")
-    } else {
-        log::info!("{extractor_name} took {elapsed:.2} seconds");
-    }
+    log::info!("{extractor_name} took {elapsed:.2} seconds");
 
     let rootfs_choices = find_linux_filesystems(extract_dir, None, extractor_name);
 
     if rootfs_choices.is_empty() {
+        eprintln!("fw2tar:   {extractor_name} finished in {elapsed:.1}s — no Linux filesystem found");
         log::error!("No Linux filesystems found extracting {in_file:?} with {extractor_name}");
         return Err(ExtractProcessError::FailToFind);
     }
 
+    eprintln!(
+        "fw2tar:   {extractor_name} finished in {elapsed:.1}s — found {n} candidate filesystem(s)",
+        n = rootfs_choices.len()
+    );
+
     for (i, fs) in rootfs_choices.iter().enumerate() {
         if i >= primary_limit {
-            println!(
-                "WARNING: skipping {n} filesystems, if files are missing you may need to set --primary-limit higher",
-                n=rootfs_choices.len() - primary_limit
+            eprintln!(
+                "fw2tar:   {extractor_name}: skipping {n} more filesystem(s); raise --primary-limit if files are missing",
+                n = rootfs_choices.len() - primary_limit
             );
             break;
         }
@@ -108,10 +110,9 @@ pub fn extract_and_process(
             out_file_base.with_file_name(format!("{}.{extractor_name}.{i}.tar.gz", file_name))
         };
 
-        // XXX: improve error handling here
-        let (file_node_count, manifest) =
-            tar_fs(&fs.path, &tar_path, metadata, extractor_name).unwrap();
-        let archive_hash = sha1_file(&tar_path).unwrap();
+        let (file_node_count, manifest) = tar_fs(&fs.path, &tar_path, metadata, extractor_name)
+            .map_err(ExtractProcessError::TarFail)?;
+        let archive_hash = sha1_file(&tar_path).map_err(ExtractProcessError::HashFail)?;
 
         results.lock().unwrap().push(ExtractionResult {
             extractor: extractor_name,
@@ -131,6 +132,15 @@ pub fn extract_and_process(
     Ok(())
 }
 
+/// Per-extractor log file path next to the output base: `<base>.<extractor>.log`.
+/// Uses `with_file_name` (string append) rather than `with_extension`, which
+/// would greedily strip a dotted segment from the base. Shared by the producer
+/// (extraction) and the post-run stray-artifact cleanup so the two never drift.
+pub fn extractor_log_path(out_file_base: &Path, extractor_name: &str) -> PathBuf {
+    let file_name = out_file_base.file_name().unwrap().to_string_lossy();
+    out_file_base.with_file_name(format!("{file_name}.{extractor_name}.log"))
+}
+
 pub fn sha1_file(file: &Path) -> io::Result<String> {
     let bytes = std::fs::read(file)?;
 
@@ -139,4 +149,27 @@ pub fn sha1_file(file: &Path) -> io::Result<String> {
     let result = hasher.finalize();
 
     Ok(format!("{result:x}"))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn extractor_log_path_appends_without_greedy_strip() {
+        // A dotted version segment in the base must survive (same contract as
+        // the output archive path).
+        assert_eq!(
+            extractor_log_path(Path::new("/out/RAX54Sv2-V1.1.4.28"), "unblob"),
+            PathBuf::from("/out/RAX54Sv2-V1.1.4.28.unblob.log")
+        );
+    }
+
+    #[test]
+    fn extractor_log_path_preserves_directory() {
+        assert_eq!(
+            extractor_log_path(Path::new("/out/dir/firmware"), "binwalkv3"),
+            PathBuf::from("/out/dir/firmware.binwalkv3.log")
+        );
+    }
 }

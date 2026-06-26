@@ -5,7 +5,7 @@ mod error;
 pub mod extractors;
 pub mod metadata;
 
-use analysis::{extract_and_process, ExtractionResult};
+use analysis::{extract_and_process, extractor_log_path, ExtractionResult};
 pub use error::Fw2tarError;
 use metadata::{Manifest, Metadata};
 
@@ -17,7 +17,6 @@ use std::{env, fs, thread};
 pub enum BestExtractor {
     Best(&'static str),
     Only(&'static str),
-    Identical(&'static str),
     None,
 }
 
@@ -67,7 +66,7 @@ pub fn main(args: args::Args) -> Result<(BestExtractor, PathBuf), Fw2tarError> {
 
     extractors::set_timeout(args.timeout);
 
-    let extractors: Vec<_> = args
+    let extractors: Vec<String> = args
         .extractors
         .map(|extractors| extractors.split(",").map(String::from).collect())
         .unwrap_or_else(|| {
@@ -76,11 +75,18 @@ pub fn main(args: args::Args) -> Result<(BestExtractor, PathBuf), Fw2tarError> {
                 .collect()
         });
 
+    eprintln!(
+        "fw2tar: extracting {} with {} extractor(s): {}",
+        args.firmware.display(),
+        extractors.len(),
+        extractors.join(", ")
+    );
+
     let results: Mutex<Vec<ExtractionResult>> = Mutex::new(Vec::new());
 
     thread::scope(|threads| -> Result<(), Fw2tarError> {
-        for extractor_name in extractors {
-            let extractor = extractors::get_extractor(&extractor_name)
+        for extractor_name in &extractors {
+            let extractor = extractors::get_extractor(extractor_name)
                 .ok_or_else(|| Fw2tarError::InvalidExtractor(extractor_name.clone()))?;
 
             threads.spawn(|| {
@@ -91,7 +97,6 @@ pub fn main(args: args::Args) -> Result<(BestExtractor, PathBuf), Fw2tarError> {
                     args.scratch_dir.as_deref(),
                     args.loud,
                     args.primary_limit,
-                    args.secondary_limit,
                     &results,
                     &metadata,
                 ) {
@@ -106,35 +111,73 @@ pub fn main(args: args::Args) -> Result<(BestExtractor, PathBuf), Fw2tarError> {
     let results = results.lock().unwrap();
     let mut best_results: Vec<_> = results.iter().filter(|&res| res.index == 0).collect();
 
-    let result = if best_results.is_empty() {
+    if best_results.is_empty() {
         return Ok((BestExtractor::None, selected_output_path));
-    } else if best_results.len() == 1 {
-        Ok((
-            BestExtractor::Only(best_results[0].extractor),
-            selected_output_path.clone(),
-        ))
-    } else {
-        best_results.sort_by_key(|res| Reverse((res.file_node_count, res.extractor == "unblob")));
+    }
 
-        Ok((
-            BestExtractor::Best(best_results[0].extractor),
-            selected_output_path.clone(),
-        ))
+    let result = if best_results.len() == 1 {
+        BestExtractor::Only(best_results[0].extractor)
+    } else {
+        eprintln!(
+            "fw2tar: comparing {} candidate archives to pick the best extraction",
+            best_results.len()
+        );
+        best_results.sort_by_key(|res| Reverse((res.file_node_count, res.extractor == "unblob")));
+        BestExtractor::Best(best_results[0].extractor)
     };
 
     let best_result = best_results[0];
 
-    fs::rename(&best_result.path, &selected_output_path).unwrap();
+    fs::rename(&best_result.path, &selected_output_path)
+        .map_err(|e| Fw2tarError::OutputWrite(selected_output_path.clone(), e))?;
 
     write_manifest_sidecar(&best_result.manifest, &selected_output_path);
 
-    result
+    // The winning archive was renamed to `selected_output_path`; everything else
+    // produced during the run (losing candidate tarballs, per-extractor logs) is
+    // intermediate scratch the user did not ask for. Sweep it up on success.
+    cleanup_stray_artifacts(&results, &extractors, &output, args.loud);
+
+    Ok((result, selected_output_path))
+}
+
+/// Remove intermediate files left next to the output after a successful run:
+/// the non-selected candidate `*.tar.gz` archives (the winner has already been
+/// renamed away from its candidate path) and, unless running `--loud`, the
+/// per-extractor `*.log` files. Best-effort: failures are logged, never fatal.
+fn cleanup_stray_artifacts(
+    results: &[ExtractionResult],
+    requested_extractors: &[String],
+    output_base: &Path,
+    loud: bool,
+) {
+    for res in results {
+        if res.path.exists() {
+            if let Err(e) = fs::remove_file(&res.path) {
+                log::warn!("failed to remove intermediate archive {:?}: {e}", res.path);
+            }
+        }
+    }
+
+    if loud {
+        return;
+    }
+
+    for extractor in requested_extractors {
+        let log_path = extractor_log_path(output_base, extractor);
+        if log_path.exists() {
+            if let Err(e) = fs::remove_file(&log_path) {
+                log::warn!("failed to remove extractor log {log_path:?}: {e}");
+            }
+        }
+    }
 }
 
 /// Write the chosen archive's manifest as a standalone `<archive>.manifest.json`
-/// sidecar (the same content embedded in the archive's gzip trailer), and warn
-/// about any device nodes that were stripped so the loss is never silent. The
-/// sidecar is best-effort: a failure to write it is logged, not fatal.
+/// sidecar (the same content embedded in the archive's gzip trailer), and report
+/// any device nodes that were stripped so the loss is never silent. The progress
+/// notices go to stderr (always visible, unlike the level-gated logger); the
+/// sidecar itself is best-effort — a failure to write it is logged, not fatal.
 fn write_manifest_sidecar(manifest: &Manifest, output: &Path) {
     if !manifest.devices.is_empty() {
         let in_dev = manifest
@@ -142,10 +185,9 @@ fn write_manifest_sidecar(manifest: &Manifest, output: &Path) {
             .iter()
             .filter(|d| d.path.starts_with("/dev/"))
             .count();
-        log::warn!(
-            "stripped {} device node(s) from the rootfs ({in_dev} under /dev) — see {}.manifest.json",
+        eprintln!(
+            "fw2tar: stripped {} device node(s) from the rootfs ({in_dev} under /dev) — recorded in the manifest",
             manifest.devices.len(),
-            output.display()
         );
     }
 
@@ -156,7 +198,7 @@ fn write_manifest_sidecar(manifest: &Manifest, output: &Path) {
     };
     match serde_json::to_vec_pretty(manifest) {
         Ok(bytes) => match fs::write(&sidecar_path, bytes) {
-            Ok(()) => log::info!("wrote manifest sidecar {sidecar_path:?}"),
+            Ok(()) => eprintln!("fw2tar: wrote manifest sidecar {}", sidecar_path.display()),
             Err(e) => log::warn!("failed to write manifest sidecar {sidecar_path:?}: {e}"),
         },
         Err(e) => log::warn!("failed to serialize manifest: {e}"),
