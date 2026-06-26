@@ -1,3 +1,4 @@
+use std::io;
 use std::path::PathBuf;
 
 use thiserror::Error;
@@ -15,4 +16,7 @@ pub enum Fw2tarError {
 
     #[error("Output file ({0:?}) already exists. Use --force to overwrite.")]
     OutputExists(PathBuf),
+
+    #[error("Failed to write output archive ({0:?}): {1}")]
+    OutputWrite(PathBuf, io::Error),
 }

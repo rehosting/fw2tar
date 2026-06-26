@@ -25,9 +25,6 @@ fn main() {
             BestExtractor::Only(extractor) => {
                 println!("Only extractor: {extractor}, archive at {output_path:?}");
             }
-            BestExtractor::Identical(extractor) => {
-                println!("Extractors Identical, using {extractor}. Archive at {output_path:?}");
-            }
             BestExtractor::None => {
                 println!("No extractor succeeded.");
                 exit(2);

@@ -23,17 +23,9 @@ pub struct Args {
     #[arg(long)]
     pub loud: bool,
 
-    /// Create a file next to the output file reporting the extractor used
-    #[arg(long, alias("report_extractor"))]
-    pub report_extractor: bool,
-
     /// Maximum number of root-like filesystems to extract.
     #[arg(long, default_value_t = 1, alias("primary_limit"))]
     pub primary_limit: usize,
-
-    /// Maximum number of non-root-like filesystems to extract.
-    #[arg(long, default_value_t = 0, alias("secondary_limit"))]
-    pub secondary_limit: usize,
 
     /// Overwrite existing output file
     #[arg(long)]
