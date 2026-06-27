@@ -95,11 +95,11 @@
         "shell-hooks": "shell-hooks"
       },
       "locked": {
-        "lastModified": 1782176382,
-        "narHash": "sha256-a9SYhKZby1PvgR+YKyDxErP3Bz2yRpfPpbx5PnTpFck=",
+        "lastModified": 1782588702,
+        "narHash": "sha256-MqFqJv+JGPNW8vJL8E4f30rlksuysmvzBBD0hmsW6H8=",
         "owner": "rehosting",
         "repo": "unblob",
-        "rev": "5c9680a57c3a105f95451da3875baa3eb962ba21",
+        "rev": "cd967c2c42e25f5d49426aa90e88d6d4072fcef4",
         "type": "github"
       },
       "original": {
