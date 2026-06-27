@@ -5,7 +5,14 @@
     nixpkgs.url = "github:NixOS/nixpkgs/nixpkgs-unstable";
 
     # The rehosting forks. Pinned by flake.lock to exact revisions.
-    unblob.url = "github:rehosting/unblob";
+    # unblob follows our nixpkgs so the whole extraction stack (fw2tar + unblob
+    # + binwalk) resolves to a single CPython/glibc, and so do downstream
+    # consumers that make `fw2tar` follow theirs (e.g. penguin). Without this,
+    # unblob drags in a second nixpkgs and a duplicate interpreter.
+    unblob = {
+      url = "github:rehosting/unblob";
+      inputs.nixpkgs.follows = "nixpkgs";
+    };
 
     binwalk-v2 = {
       url = "github:rehosting/binwalk";
@@ -69,8 +76,31 @@
           # needs openai/pydantic/pyyaml (utils/stitch/requirements.txt), which
           # don't build on 3.11 (a doc dep needs >=3.12), so use the default
           # python3 here rather than binwalk's pinned 3.11.
+          #
+          # nixpkgs' `openai` propagates its optional `datalib`/`realtime`/
+          # `voice-helpers` extras unconditionally, dragging in numpy + blas +
+          # lapack + sounddevice + aiohttp + websockets (~325 MB once the second
+          # interpreter is counted). fwstitch only uses the plain chat-completions
+          # HTTP client, so strip those extras -- they are `Requires-Dist`
+          # extras, not core deps, so the runtime metadata check stays happy.
+          slimOpenai =
+            let
+              heavy = [
+                "numpy"
+                "sounddevice"
+                "aiohttp"
+                "httpx-aiohttp"
+                "websockets"
+                "pandas"
+              ];
+              keep = p: !(builtins.elem (p.pname or "") heavy);
+            in
+            pkgs.python3.pkgs.openai.overridePythonAttrs (old: {
+              dependencies = builtins.filter keep (old.dependencies or [ ]);
+              propagatedBuildInputs = builtins.filter keep (old.propagatedBuildInputs or [ ]);
+            });
           stitchEnv = pkgs.python3.withPackages (ps: [
-            ps.openai
+            slimOpenai
             ps.pydantic
             ps.pyyaml
           ]);
@@ -264,6 +294,13 @@
           # own image rather than shelling out to the fw2tar container. Same
           # components as the image's runtime contents, minus the container-UX
           # entry points (banner/install scripts).
+          #
+          # `fwstitch` (the LLM-driven multi-fs stitcher) is intentionally NOT in
+          # the bundle: it is a standalone fw2tar-container tool, not part of the
+          # penguin rehost runtime, and it drags in its own openai env + a second
+          # CPython interpreter. Keeping it out of the bundle keeps that closure
+          # out of downstream images (penguin). It stays in the fw2tar container
+          # via imageContents above.
           extractionBundle = pkgs.buildEnv {
             name = "fw2tar-extraction-bundle";
             # unblob's runtimeDeps and extractionTools both carry cramfsprogs (at
@@ -273,7 +310,6 @@
             paths = [
               fw2tar
               fakerootFw2tar
-              fwstitch
               unblobPkg
               binwalkV3
               pythonEnv
