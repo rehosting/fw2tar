@@ -56,14 +56,14 @@ declare -A EXPECT=(
     [squashfs/unblob]=ok    [squashfs/binwalk]=ok    [squashfs/binwalkv3]=ok
     [cramfs/unblob]=ok      [cramfs/binwalk]=ok      [cramfs/binwalkv3]=diff:6
     [ubifs/unblob]=ok       [ubifs/binwalk]=ok       [ubifs/binwalkv3]=none
-    [jffs2/unblob]=diff:3   [jffs2/binwalk]=diff:3   [jffs2/binwalkv3]=diff:3
+    [jffs2/unblob]=ok       [jffs2/binwalk]=diff:3   [jffs2/binwalkv3]=diff:3
     [ext2/unblob]=diff:4    [ext2/binwalk]=none      [ext2/binwalkv3]=none
     [ext3/unblob]=diff:4    [ext3/binwalk]=none      [ext3/binwalkv3]=none
     [ext4/unblob]=diff:4    [ext4/binwalk]=none      [ext4/binwalkv3]=none
     [romfs/unblob]=none     [romfs/binwalk]=none     [romfs/binwalkv3]=diff:23
     [iso9660/unblob]=diff:6 [iso9660/binwalk]=diff:6 [iso9660/binwalkv3]=none
     [fat/unblob]=none       [fat/binwalk]=none       [fat/binwalkv3]=none
-    [cpio/unblob]=diff:1    [cpio/binwalk]=ok        [cpio/binwalkv3]=diff:6
+    [cpio/unblob]=ok        [cpio/binwalk]=ok        [cpio/binwalkv3]=diff:6
     [tar/unblob]=ok         [tar/binwalk]=ok         [tar/binwalkv3]=ok
     [zip/unblob]=diff:6     [zip/binwalk]=diff:4     [zip/binwalkv3]=diff:6
 )

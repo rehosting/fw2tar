@@ -42,7 +42,7 @@ docker, not host tooling.
 | squashfs | `sasquatch` | **full** | `mksquashfs` | ✅ golden |
 | ubi/ubifs | `ubireader_extract_files` | **full** (patch `9fb1a7a7`) | `mkfs.ubifs`+`ubinize` | ✅ golden |
 | cramfs | `cramfsck -x` | **full** (LE) | `mkfs.cramfs` | ✅ golden (LE); BE gap (#5) |
-| jffs2 | `jefferson` | **loses directory modes** | `mkfs.jffs2` | ⚠️ known-bug |
+| jffs2 | `jefferson` | **full** (unblob); binwalk loses dir modes | `mkfs.jffs2` | ✅ ok (unblob); ⚠️ binwalk known-bug |
 | extfs (ext2/3/4) | `debugfs -R rdump` | **loses special bits** | `mke2fs -d` | ⚠️ known-bug |
 | romfs | `RomfsExtractor` | keeps symlinks, **loses exec bits** | `genromfs -d` | ⛔ no-rootfs |
 | iso9660 | Rock Ridge | base modes + exec bits; **loses suid/sgid/sticky + some symlinks** | `genisoimage -R` | ⚠️ diff |
@@ -56,7 +56,7 @@ formats, so they're characterized too:
 | Handler | Extractor tool | Preserves metadata? | Fixture builder | Status |
 |---|---|---|---|---|
 | tar | unblob `TarExtractor` | **full** | `tar` | ✅ ok (all extractors) |
-| cpio | unblob `BinaryCPIOExtractor` | **near-full** (loses 1 dir bit under unblob) | `cpio -H newc` | ⚠️ unblob diff / binwalk ok |
+| cpio | unblob `BinaryCPIOExtractor` | **full** (unblob + binwalk) | `cpio -H newc` | ✅ ok (unblob, binwalk) |
 | zip | `7z` | **loses special bits** | `zip` | ⚠️ diff (all extractors) |
 | ar, arc, arj, cab, rar, dmg, stuffit | `unar` / `7z` | varies; rare in Linux firmware | (not built) | not characterized |
 | vendor wrappers (dlink, netgear, qnap, xiaomi, engeniustech, hp, instar) | custom | firmware-specific | — (need real firmware) | nightly only |
@@ -72,7 +72,7 @@ fixture    unblob       binwalk      binwalkv3
 squashfs   ok           ok           ok
 cramfs     ok           ok           diff:6
 ubifs      ok           ok           none
-jffs2      diff:3       diff:3       diff:3
+jffs2      ok           diff:3       diff:3
 ext2       diff:4       none         none
 ext3       diff:4       none         none
 ext4       diff:4       none         none
@@ -80,7 +80,7 @@ romfs      none         none         diff:23
 yaffs      skip         skip         skip
 iso9660    diff:6       diff:6       none
 fat        none         none         none
-cpio       diff:1       ok           diff:6
+cpio       ok           ok           diff:6
 tar        ok           ok           ok
 zip        diff:6       diff:4       diff:6
 ```
@@ -99,17 +99,20 @@ Each `diff:N` count is **pinned** by the gate (see "Gate", below).
   binwalk/binwalkv3 produce nothing detectable.
 - **romfs**: the mirror image — **only binwalkv3** produces a rootfs (with heavy perm
   loss, `diff:23`); unblob and binwalk produce nothing.
-- **jffs2**: all three lose the same 3 directory modes — the bug is in the shared
-  `jefferson` path, independent of which extractor invokes it.
+- **jffs2**: `jefferson` (the shared extractor) loses 3 directory modes, but unblob's
+  jffs2 handler now re-applies them post-extraction (rehosting/unblob#5), so
+  unblob is full-fidelity; binwalk/binwalkv3 call jefferson directly and still
+  show `diff:3`.
 - **tar** is preserved perfectly by all three extractors.
-- **cpio**: binwalk is perfect; unblob's own cpio extractor drops one bit
-  (`opt/sticky 1777 → 1755`, i.e. loses the group/other write bits while keeping
-  sticky); binwalkv3 doesn't handle cpio.
+- **cpio**: unblob and binwalk are both perfect. unblob's own cpio extractor used
+  to drop a bit on sticky directories (`opt/sticky 1777 → 1755`); fixed upstream in
+  the fork (rehosting/unblob#4, re-applying dir modes deepest-first). binwalkv3
+  doesn't handle cpio.
 - **zip** (`7z` path) loses special bits everywhere (`busybox 4755→755`, sgid/sticky
   dropped) but unlike fat it *is* detected as a rootfs, because 7z does restore base
   modes + exec bits from zip's stored attributes — only the high bits are lost.
 
-The ext4-vs-romfs split (and cpio's unblob-vs-binwalk split) is concrete evidence for
+The ext4-vs-romfs split is concrete evidence for
 why fw2tar runs **multiple extractors and picks the best** — no single extractor wins
 across all types.
 
@@ -120,13 +123,13 @@ across all types.
 | **squashfs** | any | ✓ | ✓ | ✓ | ✓ |
 | **ubifs** | unblob/binwalk | ✓ | ✓ | ✓ | ✓ |
 | **cramfs (LE)** | unblob/binwalk | ✓ | ✓ | ✓ | ✓ |
-| **jffs2** | (all) jefferson | ✓ (files) | ✓ (files) | **✗ reset to 0755** | ✓ |
+| **jffs2** | unblob (jefferson) | ✓ (files) | ✓ | ✓ (binwalk: reset to 0755) | ✓ |
 | **ext2/3/4** | unblob (debugfs) | ✓ | **✗ dropped** | ✓ | ✓ |
 | **romfs** | binwalkv3 | ✗ | ✗ | ✗ | (varies) |
 | **iso9660** | unblob/binwalk (Rock Ridge) | ✓ | **✗ dropped** | ✓ | ✓ |
 | **fat** | — (none) | ✗ | ✗ | ✗ | ✗ |
 | **tar** | any | ✓ | ✓ | ✓ | ✓ |
-| **cpio** | binwalk | ✓ | ✓ | ✓ (unblob loses 1 bit) | ✓ |
+| **cpio** | unblob / binwalk | ✓ | ✓ | ✓ | ✓ |
 | **zip** | 7z | ✓ | **✗ dropped** | ✓ | ✓ |
 
 ### Known bugs encoded as fixtures
@@ -136,10 +139,12 @@ across all types.
   `opt/sgid 2750 → 750`, `opt/sticky 1777 → 777`. All three ext variants behave
   identically (same handler). Encoded as `known-bug (XFAIL)`. Fix = B1 / issue #52.
 
-- **jffs2 (jefferson) resets directory modes to 0755.** File modes (including suid)
-  survive, but every non-755 directory is flattened: `opt/sgid 2750 → 755`,
-  `opt/sticky 1777 → 755`, and crucially restrictive dirs like `var 0700 → 755`. This
-  was **discovered by the harness** and is not yet a filed issue — worth one.
+- **jffs2 (jefferson) resets directory modes to 0755 — fixed for unblob.** `jefferson`
+  flattens every non-755 directory (`opt/sgid 2750 → 755`, `opt/sticky 1777 → 755`,
+  restrictive dirs like `var 0700 → 755`). Discovered by the harness (#54); unblob's
+  jffs2 handler now re-applies the source directory modes after jefferson runs
+  (rehosting/unblob#5), so **unblob is full-fidelity**. binwalk/binwalkv3 invoke
+  jefferson directly and still exhibit the loss (`diff:3`).
 
 - **7z-extracted filesystems (fat, ntfs) lose unix metadata wholesale.** `7z`
   does not restore unix perms; symlinks come out as empty files and exec
