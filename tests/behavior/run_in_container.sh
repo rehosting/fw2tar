@@ -36,6 +36,10 @@ FIXTURES=(
     "cpio|rootfs.cpio"
     "tar|rootfs.tar"
     "zip|rootfs.zip"
+    # nested: a real filesystem carried inside another container (firmware shape).
+    # Exercises recursion + inner-rootfs selection; gated for cruft below.
+    "squashfs_in_ext4|rootfs.sqfs_in_ext4"
+    "ext4_in_tar|rootfs.ext4_in_tar"
 )
 
 # Expected outcome per "<fixture>/<extractor>" cell:
@@ -66,6 +70,10 @@ declare -A EXPECT=(
     [cpio/unblob]=ok        [cpio/binwalk]=ok        [cpio/binwalkv3]=diff:6
     [tar/unblob]=ok         [tar/binwalk]=ok         [tar/binwalkv3]=ok
     [zip/unblob]=diff:6     [zip/binwalk]=diff:4     [zip/binwalkv3]=diff:6
+    # nested fixtures (baselined 2026-06-28): the inner rootfs must be selected
+    # through the outer container with full fidelity for unblob.
+    [squashfs_in_ext4/unblob]=ok  [squashfs_in_ext4/binwalk]=none [squashfs_in_ext4/binwalkv3]=ok
+    [ext4_in_tar/unblob]=ok       [ext4_in_tar/binwalk]=none      [ext4_in_tar/binwalkv3]=none
 )
 
 # Optional fixture subset (positional args). Empty => all fixtures.
@@ -80,7 +88,8 @@ declare -A type_for=( [rootfs.ext2]=ext2 [rootfs.ext3]=ext3 [rootfs.ext4]=ext4 \
     [rootfs.squashfs]=squashfs [rootfs.cramfs]=cramfs [rootfs.jffs2]=jffs2 \
     [rootfs.ubifs]=ubifs [rootfs.iso]=iso9660 [rootfs.fat]=fat \
     [rootfs.romfs]=romfs [rootfs.yaffs2]=yaffs \
-    [rootfs.cpio]=cpio [rootfs.tar]=tar [rootfs.zip]=zip )
+    [rootfs.cpio]=cpio [rootfs.tar]=tar [rootfs.zip]=zip \
+    [rootfs.sqfs_in_ext4]=squashfs_in_ext4 [rootfs.ext4_in_tar]=ext4_in_tar )
 
 ROOTFS_SRC="$WORK/rootfs_src"
 EXPECTED="$WORK/expected.json"
@@ -170,6 +179,35 @@ for key in "${!EXPECT[@]}"; do
     esac
     if [ "$got" != "$want" ]; then
         echo -e "${RED}REGRESSION $key: expected $want, got ${CELL[$key]:-MISSING}${END}"
+        failures=$((failures+1))
+    fi
+done
+
+# ---- no-cruft gate ----
+# A correct fw2tar output is ONLY the real rootfs: no extractor scaffolding
+# (unblob's `*.extracted` wrappers, `<offset>-<offset>` chunk dirs, leftover
+# container images from a nested extraction, etc.). For cells that produce a
+# full-fidelity rootfs, additionally assert there are zero unexpected entries
+# (--strict-extras; lost+found is allowed). Nested fixtures are the important
+# case — that is where the scaffolding would otherwise leak in.
+NOCRUFT_CELLS=(squashfs/unblob cpio/unblob squashfs_in_ext4/unblob ext4_in_tar/unblob)
+echo
+echo "== no-cruft gate =="
+for cell in "${NOCRUFT_CELLS[@]}"; do
+    name="${cell%%/*}"; extractor="${cell##*/}"
+    want_fixture "$name" || continue
+    rootfs="$(find "$WORK/out_${name}_${extractor}" -name '*.rootfs.tar.gz' 2>/dev/null | head -1)"
+    if [ -z "$rootfs" ] || [ ! -f "$rootfs" ]; then
+        echo -e "${RED}NO-CRUFT $cell: no rootfs produced${END}"
+        failures=$((failures+1)); continue
+    fi
+    n="$("$BEHAVIOR/check_behavior.py" --tar "$rootfs" --expected "$EXPECTED" \
+          --name "$name" --strict-extras --report 2>"$WORK/${name}_${extractor}.cruft")"
+    if [ "$n" = "0" ]; then
+        echo -e "${GREEN}no-cruft $cell: clean${END}"
+    else
+        echo -e "${RED}NO-CRUFT $cell: $n unexpected/mismatched entr(y/ies)${END}"
+        sed 's/^/    /' "$WORK/${name}_${extractor}.cruft" >&2 2>/dev/null || true
         failures=$((failures+1))
     fi
 done
