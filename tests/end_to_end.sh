@@ -299,6 +299,19 @@ download_file "https://static.tp-link.com/2018/201804/20180403/TL-WR841N(EU)_V14
 
 test "$FIRMWARE_PATH" "tl_wr841n" "TL-WR841N" "unblob,binwalk"
 
+# Download OpenWrt x86-64 ext4 combined disk image — regression guard for #52
+# (ext permissions). This is the original collapse path: an MBR-partitioned
+# disk image whose rootfs is a real ext4 filesystem, extracted via unblob's
+# debugfs `rdump` handler. Before the fix that path reported every file/dir as
+# 0700; the committed baseline captures the real source modes, so a regression
+# in the ext mode handling shows up as a `mode` diff here. Pinned to a release
+# so the baseline stays stable.
+FIRMWARE_PATH="$TMP_DIR/openwrt_x86_64_ext4.img.gz"
+
+download_file "https://downloads.openwrt.org/releases/23.05.5/targets/x86/64/openwrt-23.05.5-x86-64-generic-ext4-combined.img.gz" "$FIRMWARE_PATH"
+
+test "$FIRMWARE_PATH" "openwrt_x86_64" "OpenWrt x86-64 ext4" "unblob"
+
 # Download NETGEAR AX5400 (RAX54S) firmware
 FIRMWARE_PATH="$TMP_DIR/RAX54Sv2-V1.1.4.28.zip"
 
