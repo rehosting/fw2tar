@@ -43,7 +43,7 @@ docker, not host tooling.
 | ubi/ubifs | `ubireader_extract_files` | **full** (patch `9fb1a7a7`) | `mkfs.ubifs`+`ubinize` | ✅ golden |
 | cramfs | `cramfsck -x` | **full** (LE) | `mkfs.cramfs` | ✅ golden (LE); BE gap (#5) |
 | jffs2 | `jefferson` | **full** (unblob); binwalk loses dir modes | `mkfs.jffs2` | ✅ ok (unblob); ⚠️ binwalk known-bug |
-| extfs (ext2/3/4) | `debugfs -R rdump` | **loses special bits** | `mke2fs -d` | ⚠️ known-bug |
+| extfs (ext2/3/4) | `debugfs -R rdump` | **full** (unblob) | `mke2fs -d` | ✅ ok (unblob) |
 | romfs | `RomfsExtractor` | keeps symlinks, **loses exec bits** | `genromfs -d` | ⛔ no-rootfs |
 | iso9660 | Rock Ridge | base modes + exec bits; **loses suid/sgid/sticky + some symlinks** | `genisoimage -R` | ⚠️ diff |
 | fat | `7z` | none (no unix metadata) | `mkfs.vfat`+`mcopy` | ⛔ no-rootfs |
@@ -73,9 +73,9 @@ squashfs   ok           ok           ok
 cramfs     ok           ok           diff:6
 ubifs      ok           ok           none
 jffs2      ok           diff:3       diff:3
-ext2       diff:4       none         none
-ext3       diff:4       none         none
-ext4       diff:4       none         none
+ext2       ok           none         none
+ext3       ok           none         none
+ext4       ok           none         none
 romfs      none         none         diff:23
 yaffs      skip         skip         skip
 iso9660    diff:6       diff:6       none
@@ -95,8 +95,10 @@ Each `diff:N` count is **pinned** by the gate (see "Gate", below).
 - **cramfs and ubifs**: full fidelity under unblob *and* binwalk. binwalkv3 now
   extracts cramfs but loses metadata (`diff:6`), and still doesn't extract ubifs
   at all (`none`).
-- **ext2/3/4**: **only unblob** produces a rootfs (and it drops special bits);
-  binwalk/binwalkv3 produce nothing detectable.
+- **ext2/3/4**: **only unblob** produces a rootfs, now at full fidelity — `debugfs
+  rdump` drops setuid/setgid/sticky, but unblob's extfs handler re-reads the inode
+  modes from the image and re-applies them (rehosting/unblob#8). binwalk/binwalkv3
+  produce nothing detectable.
 - **romfs**: the mirror image — **only binwalkv3** produces a rootfs (with heavy perm
   loss, `diff:23`); unblob and binwalk produce nothing.
 - **jffs2**: `jefferson` (the shared extractor) loses 3 directory modes, but unblob's
@@ -112,7 +114,7 @@ Each `diff:N` count is **pinned** by the gate (see "Gate", below).
   dropped) but unlike fat it *is* detected as a rootfs, because 7z does restore base
   modes + exec bits from zip's stored attributes — only the high bits are lost.
 
-The ext4-vs-romfs split is concrete evidence for
+The unblob-only (ext) vs binwalkv3-only (romfs) split is concrete evidence for
 why fw2tar runs **multiple extractors and picks the best** — no single extractor wins
 across all types.
 
@@ -124,7 +126,7 @@ across all types.
 | **ubifs** | unblob/binwalk | ✓ | ✓ | ✓ | ✓ |
 | **cramfs (LE)** | unblob/binwalk | ✓ | ✓ | ✓ | ✓ |
 | **jffs2** | unblob (jefferson) | ✓ (files) | ✓ | ✓ (binwalk: reset to 0755) | ✓ |
-| **ext2/3/4** | unblob (debugfs) | ✓ | **✗ dropped** | ✓ | ✓ |
+| **ext2/3/4** | unblob (debugfs) | ✓ | ✓ | ✓ | ✓ |
 | **romfs** | binwalkv3 | ✗ | ✗ | ✗ | (varies) |
 | **iso9660** | unblob/binwalk (Rock Ridge) | ✓ | **✗ dropped** | ✓ | ✓ |
 | **fat** | — (none) | ✗ | ✗ | ✗ | ✗ |
@@ -134,10 +136,12 @@ across all types.
 
 ### Known bugs encoded as fixtures
 
-- **extfs (ext2/3/4) drops special bits (suid/sgid/sticky).** `debugfs rdump` restores
-  base rwx modes and symlinks but not the high bits: `bin/busybox 4755 → 755`,
-  `opt/sgid 2750 → 750`, `opt/sticky 1777 → 777`. All three ext variants behave
-  identically (same handler). Encoded as `known-bug (XFAIL)`. Fix = B1 / issue #52.
+- **extfs (ext2/3/4) special bits — fixed for unblob.** `debugfs rdump` restores the
+  base rwx modes and symlinks but drops the high bits (`bin/busybox 4755 → 755`,
+  `opt/sgid 2750 → 750`, `opt/sticky 1777 → 777`). unblob's extfs handler now re-reads
+  each inode's mode from the image (a batched `debugfs stat` pass) and re-applies it
+  after `rdump`, so all three ext variants are full-fidelity (rehosting/unblob#8,
+  issue #52). binwalk/binwalkv3 don't produce an ext rootfs at all.
 
 - **jffs2 (jefferson) resets directory modes to 0755 — fixed for unblob.** `jefferson`
   flattens every non-755 directory (`opt/sgid 2750 → 755`, `opt/sticky 1777 → 755`,
@@ -165,12 +169,13 @@ across all types.
 
 ### Caveats / gaps
 
-- **Issue #52 ("everything → 0700").** A *clean* synthetic ext4 does **not** reproduce
-  the total `0700` collapse reported in #52 — here base modes survive and only special
-  bits are lost. The reported collapse is likely specific to the real OpenWrt **combined
-  disk image** (partition table → nested partition → ext4) or a particular
-  `e2fsprogs`/`debugfs` version. Add the real image to the **nightly** suite so both
-  failure modes are covered by B1.
+- **Issue #52 ("everything → 0700").** A *clean* synthetic ext4 never reproduced the
+  total `0700` collapse reported in #52 — current `debugfs rdump` keeps the base modes
+  (including restrictive ones), losing only the special bits, which the extfs handler now
+  restores (rehosting/unblob#8). The original catastrophic collapse was likely specific
+  to an older `e2fsprogs`/`debugfs` or the real OpenWrt **combined disk image** (partition
+  table → nested partition → ext4). Worth adding that real image to the **nightly** suite
+  to confirm the collapse path is also covered, before fully closing #52.
 
 - **Big-endian cramfs (#5)** is uncovered: `mkfs.cramfs` emits host-endian (LE) only,
   which is why LE cramfs is green. A cross-endian fixture (or the real SRX5308 image in

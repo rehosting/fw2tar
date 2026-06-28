@@ -57,9 +57,9 @@ declare -A EXPECT=(
     [cramfs/unblob]=ok      [cramfs/binwalk]=ok      [cramfs/binwalkv3]=diff:6
     [ubifs/unblob]=ok       [ubifs/binwalk]=ok       [ubifs/binwalkv3]=none
     [jffs2/unblob]=ok       [jffs2/binwalk]=diff:3   [jffs2/binwalkv3]=diff:3
-    [ext2/unblob]=diff:4    [ext2/binwalk]=none      [ext2/binwalkv3]=none
-    [ext3/unblob]=diff:4    [ext3/binwalk]=none      [ext3/binwalkv3]=none
-    [ext4/unblob]=diff:4    [ext4/binwalk]=none      [ext4/binwalkv3]=none
+    [ext2/unblob]=ok        [ext2/binwalk]=none      [ext2/binwalkv3]=none
+    [ext3/unblob]=ok        [ext3/binwalk]=none      [ext3/binwalkv3]=none
+    [ext4/unblob]=ok        [ext4/binwalk]=none      [ext4/binwalkv3]=none
     [romfs/unblob]=none     [romfs/binwalk]=none     [romfs/binwalkv3]=diff:23
     [iso9660/unblob]=diff:6 [iso9660/binwalk]=diff:6 [iso9660/binwalkv3]=none
     [fat/unblob]=none       [fat/binwalk]=none       [fat/binwalkv3]=none
