@@ -83,6 +83,8 @@ fat        none         none         none
 cpio       ok           ok           diff:6
 tar        ok           ok           ok
 zip        diff:6       diff:4       diff:6
+squashfs_in_ext4 ok     none         ok
+ext4_in_tar      ok     none         none
 ```
 
 `ok` = full fidelity · `diff:N` = rootfs produced but N metadata mismatches ·
@@ -167,6 +169,36 @@ across all types.
   but no file comes out executable, so — like the 7z types — the tree fails rootfs
   detection and no archive is produced. Encoded as `no-rootfs`.
 
+### Nested filesystems (file type in another type)
+
+Real firmware rarely ships a bare filesystem — the rootfs is usually carried
+*inside* another container (a boot filesystem, a partitioned disk image). Two
+fixtures exercise this directly by packing the canonical rootfs as an **inner**
+filesystem inside an **outer** one:
+
+- `squashfs_in_ext4` — an inner squashfs image stored inside an outer ext4.
+- `ext4_in_tar` — an inner ext4 image stored inside an outer tar.
+
+The contract here is *selection + fidelity*: fw2tar must recurse through the
+outer layer, recognise the inner tree as the real Linux rootfs (the outer layer
+holds a single image file, not a rootfs), and emit it at full fidelity. **unblob**
+does this for both (`ok`). binwalkv3 handles `squashfs_in_ext4` but not
+`ext4_in_tar`; binwalk recurses into neither (it doesn't produce an ext rootfs).
+
+### No-cruft gate (clean rootfs, no scaffolding)
+
+A correct fw2tar output is *only* the real rootfs. The underlying extractors
+build a tree full of scaffolding — unblob nests `*.extracted/` wrappers,
+`<offset>-<offset>` chunk directories, and (for a nested image) leaves the inner
+container file lying around. fw2tar is supposed to strip all of that and rebase
+onto the selected rootfs. The `check_behavior.py --strict-extras` mode fails on
+**any** archive entry that is not part of the canonical rootfs (`lost+found` is
+the one allowed filesystem artifact), and `run_in_container.sh` runs a dedicated
+**no-cruft gate** asserting zero unexpected entries for the full-fidelity cells
+(`squashfs`, `cpio`, and both nested fixtures). The nested fixtures are the
+important ones: that is exactly where the outer container image or an `.extracted`
+wrapper would leak into the output if the rootfs-selection/rebasing logic broke.
+
 ### Caveats / gaps
 
 - **Issue #52 ("everything → 0700").** A *clean* synthetic ext4 never reproduced the
@@ -174,8 +206,10 @@ across all types.
   (including restrictive ones), losing only the special bits, which the extfs handler now
   restores (rehosting/unblob#8). The original catastrophic collapse was likely specific
   to an older `e2fsprogs`/`debugfs` or the real OpenWrt **combined disk image** (partition
-  table → nested partition → ext4). Worth adding that real image to the **nightly** suite
-  to confirm the collapse path is also covered, before fully closing #52.
+  table → nested partition → ext4). That real image is now in the **nightly** suite
+  (`end_to_end.sh`, with a mode-capturing baseline — `/tmp` 1777 etc.), covering the
+  combined-disk path end-to-end; the `squashfs_in_ext4`/`ext4_in_tar` fixtures cover the
+  synthetic fs-in-fs path on every run.
 
 - **Big-endian cramfs (#5)** is uncovered: `mkfs.cramfs` emits host-endian (LE) only,
   which is why LE cramfs is green. A cross-endian fixture (or the real SRX5308 image in

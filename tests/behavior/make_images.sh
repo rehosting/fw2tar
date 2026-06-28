@@ -124,9 +124,35 @@ build_fat() {
     echo "built $OUT/rootfs.fat"
 }
 
+# --- nested fixtures: a real filesystem carried INSIDE another container ---
+# These mirror how firmware actually ships (a rootfs image embedded in a boot
+# filesystem / disk image) and exercise fw2tar's job of recursing through the
+# outer layer, selecting the inner Linux rootfs, and emitting it cleanly without
+# the extractor's nesting scaffolding.
+
+build_squashfs_in_ext4() {  # inner squashfs, wrapped in an outer ext4
+    rm -f "$OUT/rootfs.sqfs_in_ext4"
+    local stage="$TMP/sqfs_in_ext4"
+    rm -rf "$stage"; mkdir -p "$stage"
+    mksquashfs "$ROOT" "$stage/rootfs.squashfs" -noappend -no-progress >/dev/null
+    mke2fs -q -F -t ext4 -b 1024 -d "$stage" "$OUT/rootfs.sqfs_in_ext4" 16384
+    echo "built $OUT/rootfs.sqfs_in_ext4"
+}
+
+build_ext4_in_tar() {  # inner ext4, wrapped in an outer tar
+    rm -f "$OUT/rootfs.ext4_in_tar"
+    local stage="$TMP/ext4_in_tar"
+    rm -rf "$stage"; mkdir -p "$stage"
+    mke2fs -q -F -t ext4 -b 1024 -d "$ROOT" "$stage/rootfs.ext4" 16384
+    tar --numeric-owner -C "$stage" -cf "$OUT/rootfs.ext4_in_tar" .
+    echo "built $OUT/rootfs.ext4_in_tar"
+}
+
 for t in "${TYPES[@]}"; do
     case "$t" in
         ext2|ext3|ext4) build_extfs "$t" ;;
+        squashfs_in_ext4) build_squashfs_in_ext4 ;;
+        ext4_in_tar)      build_ext4_in_tar ;;
         squashfs) build_squashfs ;;
         cramfs)   build_cramfs ;;
         jffs2)    build_jffs2 ;;
