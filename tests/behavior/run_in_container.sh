@@ -212,6 +212,48 @@ for cell in "${NOCRUFT_CELLS[@]}"; do
     fi
 done
 
+# ---- recursion-cruft gate ----
+# The case that actually bites: an extractable artifact (here a .tar.gz) living
+# INSIDE the real rootfs. Extractors recursively unpack it in place next to the
+# file (unblob -> `payload.tar.gz_extract/`, binwalk v3 -> `payload.tar.gz.extracted/`),
+# and that scaffolding must NOT ride along into the output — but the artifact
+# FILE itself must survive. Build a rootfs carrying the artifact, extract it with
+# every extractor, and for every extractor that produces a rootfs assert the
+# output is exactly the rootfs + the artifact file and nothing unpacked from it.
+RECURSION_TYPES=(squashfs ext4)
+ART_SRC="$WORK/rootfs_artifact"
+ART_EXPECTED="$WORK/expected_artifact.json"
+ART_IMAGES="$WORK/images_artifact"
+echo
+echo "== recursion-cruft gate (artifact embedded inside the rootfs) =="
+"$BEHAVIOR/build_rootfs.py" --embed-artifact "$ART_SRC" "$ART_EXPECTED" >/dev/null || exit 1
+mkdir -p "$ART_IMAGES"
+"$BEHAVIOR/make_images.sh" "$ART_SRC" "$ART_IMAGES" "${RECURSION_TYPES[@]}" >/dev/null || exit 1
+for t in "${RECURSION_TYPES[@]}"; do
+    img="$ART_IMAGES/rootfs.$t"
+    [ -f "$img" ] || continue
+    for e in "${EXTRACTORS[@]}"; do
+        outdir="$WORK/out_artifact_${t}_${e}"; mkdir -p "$outdir"
+        fakeroot_fw2tar "$img" --output "$outdir/art" --extractors "$e" \
+            --timeout 120 --force >"$WORK/artifact_${t}_${e}.log" 2>&1
+        rootfs="$(find "$outdir" -name '*.rootfs.tar.gz' 2>/dev/null | head -1)"
+        if [ -z "$rootfs" ] || [ ! -f "$rootfs" ]; then
+            echo -e "${YELLOW}recursion-cruft $t/$e: no rootfs (not gated)${END}"
+            continue
+        fi
+        n="$("$BEHAVIOR/check_behavior.py" --tar "$rootfs" --expected "$ART_EXPECTED" \
+              --name "artifact_${t}_${e}" --strict-extras --report \
+              2>"$WORK/artifact_${t}_${e}.cruft")"
+        if [ "$n" = "0" ]; then
+            echo -e "${GREEN}recursion-cruft $t/$e: clean (artifact kept, recursion stripped)${END}"
+        else
+            echo -e "${RED}RECURSION-CRUFT $t/$e: $n leaked/mismatched entr(y/ies)${END}"
+            head -8 "$WORK/artifact_${t}_${e}.cruft" 2>/dev/null | while IFS= read -r l; do echo "    $l"; done
+            failures=$((failures+1))
+        fi
+    done
+done
+
 echo
 if [ "$failures" -eq 0 ]; then
     echo -e "${GREEN}behavior: matrix matches expectations${END}"

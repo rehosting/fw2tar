@@ -15,10 +15,12 @@ Run unprivileged. Modes (including suid/sgid/sticky) are set with chmod; ownersh
 is whatever the building user has (the characterization focuses on MODES, which is
 where issue #52 bites).
 """
+import argparse
+import gzip
+import io
 import json
 import os
-import stat
-import sys
+import tarfile
 from pathlib import Path
 
 # (relative path, octal mode). Directories end with "/".
@@ -61,7 +63,29 @@ SYMLINKS = [
 ]
 
 
-def build(root: Path) -> dict:
+# An extractable artifact that lives *inside* the real rootfs. Extractors will
+# recursively unpack it in place (unblob -> `payload.tar.gz_extract/`, binwalk v3
+# -> `payload.tar.gz.extracted/`). The artifact FILE is real firmware content and
+# must survive; the recursive-unpack directory is scaffolding and must NOT appear
+# in the output. Only the file (not its unpacked contents) goes into `expected`.
+ARTIFACT_DIR = "usr/share/"
+ARTIFACT_PATH = "usr/share/payload.tar.gz"
+ARTIFACT_INNER = [("recursion_cruft_marker_a.txt", b"INNER A\n"),
+                  ("recursion_cruft_marker_b.txt", b"INNER B\n")]
+
+
+def _artifact_bytes() -> bytes:
+    """A deterministic .tar.gz that extractors will recurse into."""
+    raw = io.BytesIO()
+    with tarfile.open(fileobj=raw, mode="w") as tf:
+        for name, data in ARTIFACT_INNER:
+            ti = tarfile.TarInfo(name)
+            ti.size = len(data)
+            tf.addfile(ti, io.BytesIO(data))
+    return gzip.compress(raw.getvalue(), mtime=0)
+
+
+def build(root: Path, embed_artifact: bool = False) -> dict:
     expected: dict = {}
 
     # Root dir: fw2tar forces the archive root to 0755 (see archive.rs).
@@ -95,20 +119,36 @@ def build(root: Path) -> dict:
     for rel, mode in DIRS:
         os.chmod(root / rel, mode)
 
+    if embed_artifact:
+        d = root / ARTIFACT_DIR
+        d.mkdir(parents=True, exist_ok=True)
+        os.chmod(d, 0o755)
+        expected[ARTIFACT_DIR.rstrip("/")] = {"type": "directory", "mode": oct(0o755)}
+        data = _artifact_bytes()
+        p = root / ARTIFACT_PATH
+        p.write_bytes(data)
+        os.chmod(p, 0o644)
+        # Only the artifact file is expected; its unpacked contents must NOT appear.
+        expected[ARTIFACT_PATH] = {"type": "file", "mode": oct(0o644), "size": len(data)}
+
     return expected
 
 
 def main():
-    if len(sys.argv) != 3:
-        print(f"usage: {sys.argv[0]} <rootfs_dir> <expected.json>", file=sys.stderr)
-        sys.exit(2)
+    ap = argparse.ArgumentParser(description=__doc__)
+    ap.add_argument("rootfs_dir")
+    ap.add_argument("expected_json")
+    ap.add_argument("--embed-artifact", action="store_true",
+                    help="also embed an extractable .tar.gz inside the rootfs to "
+                         "exercise the in-tree recursion-cruft strip")
+    args = ap.parse_args()
 
-    root = Path(sys.argv[1])
+    root = Path(args.rootfs_dir)
     root.mkdir(parents=True, exist_ok=True)
-    expected = build(root)
+    expected = build(root, embed_artifact=args.embed_artifact)
 
-    Path(sys.argv[2]).write_text(json.dumps(expected, indent=2, sort_keys=True))
-    print(f"built rootfs at {root} ({len(expected)} entries), expectations -> {sys.argv[2]}")
+    Path(args.expected_json).write_text(json.dumps(expected, indent=2, sort_keys=True))
+    print(f"built rootfs at {root} ({len(expected)} entries), expectations -> {args.expected_json}")
 
 
 if __name__ == "__main__":
