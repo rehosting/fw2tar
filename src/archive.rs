@@ -23,18 +23,34 @@ pub const MANIFEST_MAGIC: &[u8; 16] = b"made with fw2tar";
 /// Version of the trailer *framing* (distinct from the manifest schema version).
 const TRAILER_FRAME_VERSION: u16 = 1;
 
-static BAD_PREFIXES: &[&str] = &["0.tar", "squashfs-root"];
-// Extractor recursive-unpack directories created *in place* next to the file
-// they came from. unblob uses `<name>_extract`; binwalk v3 uses `<name>.extracted`
-// (and `decompressed.bin` chunks beneath it). These are not part of the firmware
-// and must never ride along into the output archive.
-static BAD_SUFFIXES: &[&str] = &["_extract", ".extracted", ".uncompressed", ".unknown"];
+// Names that an extractor gives to the recursive-unpack / carve directories it
+// creates *in place* next to the data it came from. These are scaffolding, not
+// firmware: they must be excluded both from the output archive (`tar_fs`) and
+// from rootfs detection (`directory_executables`). This is the single source of
+// truth for both — keeping them in one list is what stops the two from drifting
+// (a drift is exactly what let binwalk v3's `.extracted` dirs leak originally).
+//
+//   suffix `_extract`                  unblob      (`<name>_extract`)
+//   suffix `.extracted`                binwalk v3  (`<name>.extracted`; nested
+//                                                    `decompressed.bin`/`0` live
+//                                                    under it, pruned with it)
+//   suffix `.uncompressed`/`.unknown`  unblob carve chunks
+//   prefix `squashfs-root`             binwalk     (`squashfs-root`, `squashfs-root-0`)
+//   prefix `cpio-root`                 binwalk     (`cpio-root`)
+//   prefix `0.tar`                     binwalk     (`0.tar`, `0.tar.gz`)
+static ARTIFACT_PREFIXES: &[&str] = &["0.tar", "squashfs-root", "cpio-root"];
+static ARTIFACT_SUFFIXES: &[&str] = &["_extract", ".extracted", ".uncompressed", ".unknown"];
 
 /// True when a path component looks like an extractor artifact (an intermediate
-/// carve/unpack directory) that should be excluded from the output archive.
-fn is_extraction_artifact(name: &str) -> bool {
-    BAD_PREFIXES.iter().any(|prefix| name.starts_with(prefix))
-        || BAD_SUFFIXES.iter().any(|suffix| name.ends_with(suffix))
+/// carve/unpack directory) that should be excluded from the output archive and
+/// ignored during rootfs detection.
+pub fn is_extraction_artifact(name: &str) -> bool {
+    ARTIFACT_PREFIXES
+        .iter()
+        .any(|prefix| name.starts_with(prefix))
+        || ARTIFACT_SUFFIXES
+            .iter()
+            .any(|suffix| name.ends_with(suffix))
 }
 
 /// Character or block special file. Serialized as "char"/"block".
@@ -314,8 +330,12 @@ mod tests {
     #[test]
     fn flags_bad_prefixes() {
         assert!(is_extraction_artifact("0.tar"));
+        assert!(is_extraction_artifact("0.tar.gz"));
         assert!(is_extraction_artifact("squashfs-root"));
         assert!(is_extraction_artifact("squashfs-root-0"));
+        // cpio-root must be stripped from output too, not just ignored during
+        // detection (the two used to live in separate, drift-prone lists).
+        assert!(is_extraction_artifact("cpio-root"));
     }
 
     #[test]
