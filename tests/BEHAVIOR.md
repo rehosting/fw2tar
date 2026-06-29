@@ -188,16 +188,36 @@ does this for both (`ok`). binwalkv3 handles `squashfs_in_ext4` but not
 ### No-cruft gate (clean rootfs, no scaffolding)
 
 A correct fw2tar output is *only* the real rootfs. The underlying extractors
-build a tree full of scaffolding — unblob nests `*.extracted/` wrappers,
-`<offset>-<offset>` chunk directories, and (for a nested image) leaves the inner
-container file lying around. fw2tar is supposed to strip all of that and rebase
-onto the selected rootfs. The `check_behavior.py --strict-extras` mode fails on
-**any** archive entry that is not part of the canonical rootfs (`lost+found` is
-the one allowed filesystem artifact), and `run_in_container.sh` runs a dedicated
-**no-cruft gate** asserting zero unexpected entries for the full-fidelity cells
-(`squashfs`, `cpio`, and both nested fixtures). The nested fixtures are the
-important ones: that is exactly where the outer container image or an `.extracted`
-wrapper would leak into the output if the rootfs-selection/rebasing logic broke.
+build a tree full of scaffolding — unblob nests `<name>_extract/` wrappers,
+binwalk v3 nests `<name>.extracted/` wrappers, plus `<offset>-<offset>` /
+`decompressed.bin` chunk artifacts, and (for a nested image) the inner container
+file. fw2tar strips all of that during the tar walk (`archive.rs`
+`is_extraction_artifact`) and rebases onto the selected rootfs. The
+`check_behavior.py --strict-extras` mode fails on **any** archive entry that is
+not part of the canonical rootfs (`lost+found` is the one allowed filesystem
+artifact), and `run_in_container.sh` runs a dedicated **no-cruft gate** asserting
+zero unexpected entries for the full-fidelity cells (`squashfs`, `cpio`, and both
+nested fixtures).
+
+### Recursion-cruft gate (artifact embedded *inside* the rootfs)
+
+The sharper, real-world case: the genuine rootfs contains an extractable artifact
+(a `.tar.gz`, a nested image, a compressed blob), and the extractor recursively
+unpacks it **in place**, creating a sibling unpack directory right next to the
+file *inside the rootfs tree*. That directory is not firmware and must not leak
+into the output — but the artifact file itself must survive. The recursion-cruft
+gate builds a rootfs carrying an embedded `usr/share/payload.tar.gz`
+(`build_rootfs.py --embed-artifact`), extracts it with every extractor, and for
+each one that produces a rootfs asserts the output is exactly *rootfs + the
+artifact file*, with nothing unpacked from it (`--strict-extras`).
+
+This caught a real bug: fw2tar's artifact-suffix list had `_extract` (unblob's
+naming) but not `.extracted` (binwalk v3's), so **binwalk v3's in-tree recursion
+directories — including the unpacked inner files — leaked into the archive**.
+Fixed by adding `.extracted` to `BAD_SUFFIXES` in both `archive.rs` (output strip)
+and `directory_executables.rs` (rootfs detection). All three extractors are now
+clean on both `squashfs` and `ext4` carriers (binwalk/binwalkv3 produce no ext
+rootfs, so those cells are reported, not gated).
 
 ### Caveats / gaps
 

@@ -6,6 +6,7 @@ const EXECUTABLE_MASK: u32 = libc::S_IXUSR | libc::S_IXGRP | libc::S_IXOTH;
 
 static BAD_SUFFIXES: &[&str] = &[
     "_extract",
+    ".extracted", // binwalk v3 names its in-place recursion dirs `<name>.extracted`
     ".uncompressed",
     ".unknown",
     "cpio-root",

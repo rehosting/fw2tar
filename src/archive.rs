@@ -24,7 +24,11 @@ pub const MANIFEST_MAGIC: &[u8; 16] = b"made with fw2tar";
 const TRAILER_FRAME_VERSION: u16 = 1;
 
 static BAD_PREFIXES: &[&str] = &["0.tar", "squashfs-root"];
-static BAD_SUFFIXES: &[&str] = &["_extract", ".uncompressed", ".unknown"];
+// Extractor recursive-unpack directories created *in place* next to the file
+// they came from. unblob uses `<name>_extract`; binwalk v3 uses `<name>.extracted`
+// (and `decompressed.bin` chunks beneath it). These are not part of the firmware
+// and must never ride along into the output archive.
+static BAD_SUFFIXES: &[&str] = &["_extract", ".extracted", ".uncompressed", ".unknown"];
 
 /// True when a path component looks like an extractor artifact (an intermediate
 /// carve/unpack directory) that should be excluded from the output archive.
@@ -319,6 +323,8 @@ mod tests {
         assert!(is_extraction_artifact("firmware.bin_extract"));
         assert!(is_extraction_artifact("data.uncompressed"));
         assert!(is_extraction_artifact("blob.unknown"));
+        // binwalk v3 names its in-place recursion dirs `<name>.extracted`.
+        assert!(is_extraction_artifact("payload.tar.gz.extracted"));
     }
 
     #[test]
