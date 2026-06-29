@@ -35,6 +35,14 @@ fw2tar /path/to/your/firmware.bin
 
 Which will generate `/path/to/your/firmware.rootfs.tar.gz` containing the rootfs of the firmware.
 
+Some firmware splits its filesystem across more than one image (for example a
+main rootfs plus a separate `/opt` image). Raise `--primary-limit` to keep the
+extra root-like filesystems too; the best one is still written to
+`firmware.rootfs.tar.gz`, and each additional filesystem (from the same
+extractor) is written alongside it as `firmware.<N>.rootfs.tar.gz`
+(`firmware.1.rootfs.tar.gz`, `firmware.2.rootfs.tar.gz`, …). A consumer can then
+mount each where the device expects it.
+
 There are two types of arguments, wrapper arguments (which handle anything outside of the fw2tar docker container, such as rebuilding the container or specifying a docker image tag) and fw2tar flags (which get passed to the actual application). These can be found with `--wrapper-help` and `--help` respectively.
 
 ### Installing Pre-built

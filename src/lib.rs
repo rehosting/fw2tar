@@ -39,6 +39,16 @@ fn rootfs_archive_path(output_base: &Path) -> PathBuf {
     output_base.with_file_name(format!("{}.rootfs.tar.gz", file_name))
 }
 
+/// Path for a secondary root-like filesystem (index >= 1) when `--primary-limit`
+/// is raised above 1: `<base>.<index>.rootfs.tar.gz`, sitting next to the primary
+/// `<base>.rootfs.tar.gz`. Some firmware splits its rootfs across several
+/// filesystems (e.g. a main image plus an `/opt` image); a consumer can mount
+/// these where the device expects them.
+fn secondary_archive_path(output_base: &Path, index: usize) -> PathBuf {
+    let file_name = output_base.file_name().unwrap().to_string_lossy();
+    output_base.with_file_name(format!("{file_name}.{index}.rootfs.tar.gz"))
+}
+
 pub fn main(args: args::Args) -> Result<(BestExtractor, PathBuf), Fw2tarError> {
     if !args.firmware.is_file() {
         if args.firmware.exists() {
@@ -127,15 +137,43 @@ pub fn main(args: args::Args) -> Result<(BestExtractor, PathBuf), Fw2tarError> {
     };
 
     let best_result = best_results[0];
+    let winning_extractor = best_result.extractor;
 
     fs::rename(&best_result.path, &selected_output_path)
         .map_err(|e| Fw2tarError::OutputWrite(selected_output_path.clone(), e))?;
 
     write_manifest_sidecar(&best_result.manifest, &selected_output_path);
 
-    // The winning archive was renamed to `selected_output_path`; everything else
-    // produced during the run (losing candidate tarballs, per-extractor logs) is
-    // intermediate scratch the user did not ask for. Sweep it up on success.
+    // Secondary filesystems (index >= 1) from the SAME winning extractor: when
+    // `--primary-limit` is raised, some firmware splits its rootfs across several
+    // images (e.g. a main image plus an `/opt` image). Keep those, named
+    // `<base>.<index>.rootfs.tar.gz`, so a consumer can mount them; they are tied
+    // to the winning extractor so the set is internally consistent. They are
+    // renamed away from their candidate paths here, so the cleanup below (which
+    // only removes paths that still exist) leaves them in place.
+    for sec in results
+        .iter()
+        .filter(|res| res.extractor == winning_extractor && res.index >= 1)
+    {
+        let sec_path = secondary_archive_path(&output, sec.index);
+        match fs::rename(&sec.path, &sec_path) {
+            Ok(()) => {
+                eprintln!(
+                    "fw2tar: secondary filesystem #{i} ({extractor}), archive at {path:?}",
+                    i = sec.index,
+                    extractor = winning_extractor,
+                    path = sec_path,
+                );
+                write_manifest_sidecar(&sec.manifest, &sec_path);
+            }
+            Err(e) => log::warn!("failed to keep secondary filesystem {:?}: {e}", sec.path),
+        }
+    }
+
+    // The winning archive was renamed to `selected_output_path` and any secondary
+    // filesystems were renamed to their `<base>.<index>.rootfs.tar.gz` paths;
+    // everything else produced during the run (losing candidate tarballs,
+    // per-extractor logs) is intermediate scratch. Sweep it up on success.
     cleanup_stray_artifacts(&results, &extractors, &output, args.loud);
 
     Ok((result, selected_output_path))
@@ -248,6 +286,20 @@ mod tests {
         assert_eq!(
             rootfs_archive_path(Path::new("/out/dir/firmware")),
             PathBuf::from("/out/dir/firmware.rootfs.tar.gz")
+        );
+    }
+
+    #[test]
+    fn secondary_archive_path_inserts_index_before_rootfs_suffix() {
+        // Secondary filesystems sit next to the primary, distinguished by index,
+        // and (like the primary) must not greedily strip dotted version segments.
+        assert_eq!(
+            secondary_archive_path(Path::new("/out/dir/firmware"), 1),
+            PathBuf::from("/out/dir/firmware.1.rootfs.tar.gz")
+        );
+        assert_eq!(
+            secondary_archive_path(Path::new("RAX54Sv2-V1.1.4.28"), 2),
+            PathBuf::from("RAX54Sv2-V1.1.4.28.2.rootfs.tar.gz")
         );
     }
 }
