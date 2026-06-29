@@ -2,17 +2,9 @@ use std::os::unix::fs::PermissionsExt;
 use std::path::Path;
 use walkdir::{DirEntry, WalkDir};
 
-const EXECUTABLE_MASK: u32 = libc::S_IXUSR | libc::S_IXGRP | libc::S_IXOTH;
+use crate::archive::is_extraction_artifact;
 
-static BAD_SUFFIXES: &[&str] = &[
-    "_extract",
-    ".extracted", // binwalk v3 names its in-place recursion dirs `<name>.extracted`
-    ".uncompressed",
-    ".unknown",
-    "cpio-root",
-    "squashfs-root",
-    "0.tar",
-];
+const EXECUTABLE_MASK: u32 = libc::S_IXUSR | libc::S_IXGRP | libc::S_IXOTH;
 
 #[derive(Debug, Clone)]
 pub struct ExecutableInfo {
@@ -34,22 +26,8 @@ pub fn get_dir_executable_info(dir: &Path) -> ExecutableInfo {
         entry
             .path()
             .file_name()
-            .map(|name| {
-                name.to_str().map(|name| {
-                    for suffix in BAD_SUFFIXES {
-                        if name.ends_with(suffix) {
-                            return false;
-                        }
-                    }
-
-                    if name.starts_with("squashfs-root-") {
-                        return false;
-                    }
-
-                    true
-                })
-            })
-            .flatten()
+            .and_then(|name| name.to_str())
+            .map(|name| !is_extraction_artifact(name))
             .unwrap_or(true)
     };
 

@@ -211,13 +211,28 @@ gate builds a rootfs carrying an embedded `usr/share/payload.tar.gz`
 each one that produces a rootfs asserts the output is exactly *rootfs + the
 artifact file*, with nothing unpacked from it (`--strict-extras`).
 
-This caught a real bug: fw2tar's artifact-suffix list had `_extract` (unblob's
+This caught a real bug: fw2tar's artifact-name list had `_extract` (unblob's
 naming) but not `.extracted` (binwalk v3's), so **binwalk v3's in-tree recursion
 directories — including the unpacked inner files — leaked into the archive**.
-Fixed by adding `.extracted` to `BAD_SUFFIXES` in both `archive.rs` (output strip)
-and `directory_executables.rs` (rootfs detection). All three extractors are now
-clean on both `squashfs` and `ext4` carriers (binwalk/binwalkv3 produce no ext
-rootfs, so those cells are reported, not gated).
+The root cause was structural: the output-strip (`archive.rs`) and the
+rootfs-detection ignore-list (`directory_executables.rs`) were two separate
+hand-maintained lists that had drifted. They are now a **single shared
+`is_extraction_artifact`** (in `archive.rs`, used by both), covering every
+convention observed across the extractors:
+
+| convention | extractor | match |
+|---|---|---|
+| `<name>_extract` | unblob | suffix `_extract` |
+| `<name>.uncompressed` / `.unknown` | unblob carve chunks | suffix |
+| `<name>.extracted` (+ nested `0/`, `decompressed.bin`) | binwalk v3 | suffix `.extracted` |
+| `squashfs-root`, `squashfs-root-0` | binwalk | prefix `squashfs-root` |
+| `cpio-root` | binwalk | prefix `cpio-root` |
+| `0.tar`, `0.tar.gz` | binwalk | prefix `0.tar` |
+
+All three extractors are now clean on both `squashfs` and `ext4` carriers
+(binwalk/binwalkv3 produce no ext rootfs, so those cells are reported, not gated).
+Enumerated empirically by running each extractor directly and confirming every
+recursion-dir name it emits matches a rule above.
 
 ### Caveats / gaps
 
