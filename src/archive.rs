@@ -232,6 +232,21 @@ pub fn write_manifest_trailer<W: Write>(writer: &mut W, manifest: &Manifest) -> 
     Ok(())
 }
 
+/// Append a fresh manifest trailer to an existing fw2tar archive as a new gzip
+/// member. Gzip members concatenate transparently on decompression and
+/// `parse_manifest_trailer` reads from the very end, so the appended trailer
+/// supersedes any earlier one (the stale bytes mid-stream are never read). Used
+/// to reconcile a *derived* archive's embedded manifest with its sidecar — e.g.
+/// the primary is copied byte-for-byte from a winning candidate whose trailer
+/// predates the secondary-filesystem list, and this rewrites it to match.
+pub fn append_manifest_trailer(archive_path: &Path, manifest: &Manifest) -> io::Result<()> {
+    let file = fs::OpenOptions::new().append(true).open(archive_path)?;
+    let mut encoder = GzEncoder::new(file, Compression::default());
+    write_manifest_trailer(&mut encoder, manifest)?;
+    encoder.finish()?;
+    Ok(())
+}
+
 /// Parse a manifest from the tail of a decompressed fw2tar stream (the inverse
 /// of `write_manifest_trailer`). Returns `None` if the magic is absent or the
 /// framing is malformed.
@@ -262,10 +277,11 @@ pub fn parse_manifest_trailer(decompressed: &[u8]) -> Option<Manifest> {
 #[cfg(test)]
 mod tests {
     use super::{
-        is_extraction_artifact, parse_manifest_trailer, write_manifest_trailer, DeviceKind,
-        RemovedDevice,
+        append_manifest_trailer, is_extraction_artifact, parse_manifest_trailer,
+        write_manifest_trailer, Compression, DeviceKind, File, GzEncoder, RemovedDevice,
     };
-    use crate::metadata::{Manifest, Metadata, MANIFEST_VERSION};
+    use crate::metadata::{Manifest, Metadata, SecondaryFilesystem, MANIFEST_VERSION};
+    use std::io::{Read, Write};
 
     fn sample_manifest() -> Manifest {
         Manifest::new(
@@ -300,6 +316,46 @@ mod tests {
         assert_eq!(parsed.devices.len(), 1);
         assert_eq!(parsed.devices[0].path, "/dev/console");
         assert_eq!(parsed.devices[0].major, 5);
+    }
+
+    #[test]
+    fn appended_trailer_supersedes_earlier_one() {
+        // A derived archive: an initial gzip member ending in a secondary-free
+        // trailer, then an appended member carrying the updated manifest. After
+        // decompression the parser must recover the *appended* manifest from the
+        // tail — this is how the copied primary's trailer is reconciled with its
+        // sidecar.
+        use flate2::read::MultiGzDecoder;
+
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("primary.rootfs.tar.gz");
+
+        {
+            let f = File::create(&path).unwrap();
+            let mut enc = GzEncoder::new(f, Compression::default());
+            enc.write_all(b"stand-in for the tar payload").unwrap();
+            write_manifest_trailer(&mut enc, &sample_manifest()).unwrap();
+            enc.finish().unwrap();
+        }
+
+        let mut updated = sample_manifest();
+        updated.secondary_filesystems = vec![SecondaryFilesystem {
+            index: 1,
+            archive: "primary.1.rootfs.tar.gz".into(),
+        }];
+        append_manifest_trailer(&path, &updated).unwrap();
+
+        let mut decompressed = Vec::new();
+        MultiGzDecoder::new(File::open(&path).unwrap())
+            .read_to_end(&mut decompressed)
+            .unwrap();
+
+        let parsed = parse_manifest_trailer(&decompressed).expect("parse appended trailer");
+        assert_eq!(parsed.secondary_filesystems.len(), 1);
+        assert_eq!(
+            parsed.secondary_filesystems[0].archive,
+            "primary.1.rootfs.tar.gz"
+        );
     }
 
     #[test]

@@ -33,15 +33,22 @@ Once installed, repackaging a firmware is as simple as:
 fw2tar /path/to/your/firmware.bin
 ```
 
-Which will generate `/path/to/your/firmware.rootfs.tar.gz` containing the rootfs of the firmware.
+This produces two kinds of output:
+
+- One archive per extractor per candidate root filesystem, named
+  `firmware.<extractor>.<N>.tar.gz` (e.g. `firmware.unblob.0.tar.gz`,
+  `firmware.binwalk.0.tar.gz`). This is fw2tar's stable, long-standing output
+  contract — every extraction is kept so a consumer can pick.
+- `firmware.rootfs.tar.gz`, a convenience copy of the best extraction, so the
+  common "just give me the rootfs" case needs no extractor choice.
 
 Some firmware splits its filesystem across more than one image (for example a
 main rootfs plus a separate `/opt` image). Raise `--primary-limit` to keep the
-extra root-like filesystems too; the best one is still written to
-`firmware.rootfs.tar.gz`, and each additional filesystem (from the same
-extractor) is written alongside it as `firmware.<N>.rootfs.tar.gz`
-(`firmware.1.rootfs.tar.gz`, `firmware.2.rootfs.tar.gz`, …). A consumer can then
-mount each where the device expects it.
+extra root-like filesystems too; each additional filesystem from the winning
+extractor is written alongside the primary as `firmware.<N>.rootfs.tar.gz`
+(`firmware.1.rootfs.tar.gz`, `firmware.2.rootfs.tar.gz`, …), and the primary's
+manifest lists them under `secondary_filesystems` so a consumer can discover the
+full set without hardcoding filenames.
 
 There are two types of arguments, wrapper arguments (which handle anything outside of the fw2tar docker container, such as rebuilding the container or specifying a docker image tag) and fw2tar flags (which get passed to the actual application). These can be found with `--wrapper-help` and `--help` respectively.
 
@@ -86,7 +93,7 @@ Replace `/path/to/your/firmware.bin` with the actual path to your firmware file:
 ./fw2tar /path/to/your/firmware.bin
 ```
 
-The resulting filesystem(s) will be output to `/path/to/your/firmware.{binwalk,unblob}.*.tar.gz`, with each root filesystem extracted to its own archive.
+The resulting filesystem(s) will be output to `/path/to/your/firmware.{binwalk,unblob}.*.tar.gz`, with each root filesystem extracted to its own archive, plus a `firmware.rootfs.tar.gz` convenience copy of the best extraction (see [Usage](#usage) above).
 
 ## Comparing Filesystem Archives
 
