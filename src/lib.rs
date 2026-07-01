@@ -7,7 +7,7 @@ pub mod metadata;
 
 use analysis::{extract_and_process, extractor_log_path, ExtractionResult};
 pub use error::Fw2tarError;
-use metadata::{Manifest, Metadata};
+use metadata::{Manifest, Metadata, SecondaryFilesystem};
 
 use std::cmp::Reverse;
 use std::path::{Path, PathBuf};
@@ -47,6 +47,19 @@ fn rootfs_archive_path(output_base: &Path) -> PathBuf {
 fn secondary_archive_path(output_base: &Path, index: usize) -> PathBuf {
     let file_name = output_base.file_name().unwrap().to_string_lossy();
     output_base.with_file_name(format!("{file_name}.{index}.rootfs.tar.gz"))
+}
+
+/// Manifest descriptor for the secondary filesystem at `index`: its archive
+/// filename relative to the primary (they share a directory, so the bare file
+/// name is the relative path). Consumers resolve it against the primary's own
+/// location rather than hardcoding it.
+fn secondary_descriptor(output_base: &Path, index: usize) -> SecondaryFilesystem {
+    let archive = secondary_archive_path(output_base, index)
+        .file_name()
+        .unwrap()
+        .to_string_lossy()
+        .into_owned();
+    SecondaryFilesystem { index, archive }
 }
 
 pub fn main(args: args::Args) -> Result<(BestExtractor, PathBuf), Fw2tarError> {
@@ -139,64 +152,81 @@ pub fn main(args: args::Args) -> Result<(BestExtractor, PathBuf), Fw2tarError> {
     let best_result = best_results[0];
     let winning_extractor = best_result.extractor;
 
-    fs::rename(&best_result.path, &selected_output_path)
+    // Copy (not rename) the winner to the stable `<base>.rootfs.tar.gz` name so
+    // its per-candidate `<base>.<extractor>.<index>.tar.gz` archive stays in
+    // place. fw2tar's long-standing front-facing contract is one archive per
+    // extractor per candidate filesystem (`<base>.{binwalk,unblob}.*.tar.gz`);
+    // consumers still rely on those names, so they are kept. The
+    // `<base>.rootfs.tar.gz` winner is an additional convenience on top.
+    fs::copy(&best_result.path, &selected_output_path)
         .map_err(|e| Fw2tarError::OutputWrite(selected_output_path.clone(), e))?;
-
-    write_manifest_sidecar(&best_result.manifest, &selected_output_path);
 
     // Secondary filesystems (index >= 1) from the SAME winning extractor: when
     // `--primary-limit` is raised, some firmware splits its rootfs across several
-    // images (e.g. a main image plus an `/opt` image). Keep those, named
-    // `<base>.<index>.rootfs.tar.gz`, so a consumer can mount them; they are tied
-    // to the winning extractor so the set is internally consistent. They are
-    // renamed away from their candidate paths here, so the cleanup below (which
-    // only removes paths that still exist) leaves them in place.
+    // images (e.g. a main image plus an `/opt` image). Copy those to
+    // `<base>.<index>.rootfs.tar.gz` so a consumer can mount them; they are tied
+    // to the winning extractor so the set is internally consistent. Record the
+    // ones that actually landed so the primary manifest can advertise the full
+    // set (issue #70). Their own sidecars are written after.
+    let mut secondary_filesystems = Vec::new();
+    let mut secondary_sidecars = Vec::new();
     for sec in results
         .iter()
         .filter(|res| res.extractor == winning_extractor && res.index >= 1)
     {
         let sec_path = secondary_archive_path(&output, sec.index);
-        match fs::rename(&sec.path, &sec_path) {
-            Ok(()) => {
+        match fs::copy(&sec.path, &sec_path) {
+            Ok(_) => {
                 eprintln!(
                     "fw2tar: secondary filesystem #{i} ({extractor}), archive at {path:?}",
                     i = sec.index,
                     extractor = winning_extractor,
                     path = sec_path,
                 );
-                write_manifest_sidecar(&sec.manifest, &sec_path);
+                secondary_filesystems.push(secondary_descriptor(&output, sec.index));
+                secondary_sidecars.push((sec.manifest.clone(), sec_path));
             }
             Err(e) => log::warn!("failed to keep secondary filesystem {:?}: {e}", sec.path),
         }
     }
+    secondary_filesystems.sort_by_key(|fs| fs.index);
 
-    // The winning archive was renamed to `selected_output_path` and any secondary
-    // filesystems were renamed to their `<base>.<index>.rootfs.tar.gz` paths;
-    // everything else produced during the run (losing candidate tarballs,
-    // per-extractor logs) is intermediate scratch. Sweep it up on success.
-    cleanup_stray_artifacts(&results, &extractors, &output, args.loud);
+    // The primary manifest advertises the secondary set. Built after the copies
+    // above so it only lists filesystems that actually landed on disk.
+    let mut primary_manifest = best_result.manifest.clone();
+    primary_manifest.secondary_filesystems = secondary_filesystems;
+    write_manifest_sidecar(&primary_manifest, &selected_output_path);
+
+    // The primary was copied from the winning candidate, so its embedded trailer
+    // still carries that candidate's original (secondary-free) manifest. When we
+    // added secondaries, reconcile the trailer with the sidecar so the two never
+    // diverge — the manifest is the same whether a consumer reads it from the
+    // gzip trailer or the sidecar. No-op when there are no secondaries (the copy
+    // already matches).
+    if !primary_manifest.secondary_filesystems.is_empty() {
+        if let Err(e) = archive::append_manifest_trailer(&selected_output_path, &primary_manifest) {
+            log::warn!("failed to reconcile primary manifest trailer: {e}");
+        }
+    }
+
+    for (manifest, sec_path) in &secondary_sidecars {
+        write_manifest_sidecar(manifest, sec_path);
+    }
+
+    // The per-candidate `<base>.<extractor>.<index>.tar.gz` archives are part of
+    // the output contract and are deliberately kept. Only the per-extractor logs
+    // are intermediate scratch to sweep up on success.
+    cleanup_extractor_logs(&extractors, &output, args.loud);
 
     Ok((result, selected_output_path))
 }
 
-/// Remove intermediate files left next to the output after a successful run:
-/// the non-selected candidate `*.tar.gz` archives (the winner has already been
-/// renamed away from its candidate path) and, unless running `--loud`, the
-/// per-extractor `*.log` files. Best-effort: failures are logged, never fatal.
-fn cleanup_stray_artifacts(
-    results: &[ExtractionResult],
-    requested_extractors: &[String],
-    output_base: &Path,
-    loud: bool,
-) {
-    for res in results {
-        if res.path.exists() {
-            if let Err(e) = fs::remove_file(&res.path) {
-                log::warn!("failed to remove intermediate archive {:?}: {e}", res.path);
-            }
-        }
-    }
-
+/// Remove the per-extractor `<base>.<extractor>.log` files left next to the
+/// output after a successful run (unless `--loud`). The per-candidate
+/// `<base>.<extractor>.<index>.tar.gz` archives are part of fw2tar's output
+/// contract and are deliberately preserved. Best-effort: failures are logged,
+/// never fatal.
+fn cleanup_extractor_logs(requested_extractors: &[String], output_base: &Path, loud: bool) {
     if loud {
         return;
     }
@@ -301,5 +331,19 @@ mod tests {
             secondary_archive_path(Path::new("RAX54Sv2-V1.1.4.28"), 2),
             PathBuf::from("RAX54Sv2-V1.1.4.28.2.rootfs.tar.gz")
         );
+    }
+
+    #[test]
+    fn secondary_descriptor_records_relative_archive_name() {
+        // The descriptor stored in the primary manifest must be the archive's
+        // name relative to the primary (bare basename), not an absolute path,
+        // and must preserve dotted version segments.
+        let d = secondary_descriptor(Path::new("/out/dir/firmware"), 1);
+        assert_eq!(d.index, 1);
+        assert_eq!(d.archive, "firmware.1.rootfs.tar.gz");
+
+        let d = secondary_descriptor(Path::new("RAX54Sv2-V1.1.4.28"), 2);
+        assert_eq!(d.index, 2);
+        assert_eq!(d.archive, "RAX54Sv2-V1.1.4.28.2.rootfs.tar.gz");
     }
 }
