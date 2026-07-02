@@ -85,3 +85,11 @@ jobs:
           NO_BUILD: "1"
           FW2TAR_IMAGE: rehosting/fw2tar-test:latest
         run: ./tests/container/run.sh
+      # Output-layout contract: the exact set of files a run leaves in the
+      # output directory (winner, per-candidate archives, manifest sidecars,
+      # secondaries, nothing else) — the interface downstream consumers parse.
+      - name: Output-layout contract (synthetic fixtures)
+        env:
+          NO_BUILD: "1"
+          FW2TAR_IMAGE: rehosting/fw2tar-test:latest
+        run: ./tests/contract/run.sh
