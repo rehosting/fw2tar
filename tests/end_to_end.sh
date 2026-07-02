@@ -23,7 +23,8 @@ while [[ $# -gt 0 ]]; do
             echo "  --help      Show this help message"
             echo "  firmware    Names to run (default: all). Known names:"
             echo "              ax1800 rb750gr3 ax86u ac2600 linksys_ax3200"
-            echo "              google_wifi tl_wr841n openwrt_x86_64 rax54s"
+            echo "              google_wifi google_wifi_multi tl_wr841n"
+            echo "              openwrt_x86_64 rax54s"
             exit 0
             ;;
         -*)
@@ -38,6 +39,17 @@ while [[ $# -gt 0 ]]; do
     esac
 done
 
+# Baseline-diff tiering: differences on rootfs-viability paths (plus any
+# mode/type/symlink-target change, which compare_json.py always treats as
+# critical) are reported as CRITICAL; the rest as drift. Everything still
+# fails the run (--fail-on any is the default) — the tiers exist so a wall of
+# benign extractor drift can't bury the diff that matters when reviewing a
+# failure or a --update.
+CRITICAL_PATTERNS=(
+    --critical '^\./(bin|sbin|usr/bin|usr/sbin|etc|lib)(/|$)'
+    --critical '^\./(init|linuxrc)$'
+)
+
 # Color definitions
 RED='\033[0;31m'
 GREEN='\033[0;32m'
@@ -50,6 +62,7 @@ test() {
     FIRMWARE_NAME=$3
     EXTRACTORS=$4
     TIMEOUT=${5:-120}   # per-extractor timeout (s); large images need more
+    EXTRA_FLAGS=${6:-}  # extra fw2tar flags, e.g. --primary-limit 2
 
     OLD_JSON="$SCRIPT_DIR/results/${FIRMWARE_BASENAME}.json.old"
     NEW_JSON="$SCRIPT_DIR/results/${FIRMWARE_BASENAME}.json.new"
@@ -74,7 +87,8 @@ test() {
     echo "Input file exists: $([ -f "$FIRMWARE_PATH" ] && echo "YES" || echo "NO")"
     echo "Input file size: $([ -f "$FIRMWARE_PATH" ] && ls -lh "$FIRMWARE_PATH" | awk '{print $5}' || echo "N/A")"
 
-    "$SCRIPT_DIR"/../fw2tar --image "${FW2TAR_IMAGE}" --output "$FIRMWARE_PATH_OUT" --extractors "$EXTRACTORS" --timeout "$TIMEOUT" --force "$FIRMWARE_PATH"
+    # shellcheck disable=SC2086  # EXTRA_FLAGS is intentionally word-split
+    "$SCRIPT_DIR"/../fw2tar --image "${FW2TAR_IMAGE}" --output "$FIRMWARE_PATH_OUT" --extractors "$EXTRACTORS" --timeout "$TIMEOUT" --force $EXTRA_FLAGS "$FIRMWARE_PATH"
 
     # Debug: List what files were actually created
     if $DEBUG; then
@@ -115,13 +129,57 @@ test() {
         echo -e "${GREEN}✓ Updated baseline JSON for ${FIRMWARE_NAME}: $OLD_JSON${END}"
     else
         # Compare JSON files using compare_json.py with exclude patterns for .extracted directories
-        if "$SCRIPT_DIR/compare_json.py" "$OLD_JSON" "$NEW_JSON" --exclude '\.extracted($|/)' --verbose; then
+        if "$SCRIPT_DIR/compare_json.py" "$OLD_JSON" "$NEW_JSON" --exclude '\.extracted($|/)' \
+                "${CRITICAL_PATTERNS[@]}" --verbose; then
             echo -e "${GREEN}Firmware contents match for ${FIRMWARE_NAME}.${END}"
         else
             echo -e "${RED}Contents for ${FIRMWARE_NAME} do not match.${END} To approve changes replace ${OLD_JSON} with ${NEW_JSON}"
             failures=$((failures+1))
         fi
     fi
+
+    # Manifest contract on real firmware: the sidecar and the gzip-trailer copy
+    # must exist, parse, match each other and the input hash, and every
+    # advertised secondary filesystem must resolve next to the primary.
+    if "$SCRIPT_DIR/contract/check_contract.py" "$ROOTFS" \
+            --extractors "$EXTRACTORS" --secondaries auto --input "$FIRMWARE_PATH"; then
+        echo -e "${GREEN}Manifest contract holds for ${FIRMWARE_NAME}.${END}"
+    else
+        echo -e "${RED}Manifest contract violated for ${FIRMWARE_NAME}.${END}"
+        failures=$((failures+1))
+    fi
+
+    # Baseline every secondary the manifest advertises (issue #70): each
+    # <base>.<N>.rootfs.tar.gz gets its own tests/results/<name>.sec<N> baseline.
+    local sec_entries
+    mapfile -t sec_entries < <(python3 -c '
+import json, sys
+m = json.load(open(sys.argv[1]))
+for s in m.get("secondary_filesystems", []):
+    print(s["index"], s["archive"])
+' "$ROOTFS.manifest.json" 2>/dev/null)
+    local entry sec_idx sec_archive sec_tgz sec_old sec_new
+    for entry in ${sec_entries[@]+"${sec_entries[@]}"}; do
+        sec_idx="${entry%% *}"
+        sec_archive="${entry#* }"
+        sec_tgz="$(dirname "$ROOTFS")/$sec_archive"
+        sec_old="$SCRIPT_DIR/results/${FIRMWARE_BASENAME}.sec${sec_idx}.json.old"
+        sec_new="$SCRIPT_DIR/results/${FIRMWARE_BASENAME}.sec${sec_idx}.json.new"
+        "$SCRIPT_DIR/tar_to_json.py" "$sec_tgz" > "$sec_new"
+        if [[ "$UPDATE_MODE" == "true" ]]; then
+            cp "$sec_new" "$sec_old"
+            echo -e "${GREEN}✓ Updated secondary #${sec_idx} baseline for ${FIRMWARE_NAME}: $sec_old${END}"
+        elif ! [ -f "$sec_old" ]; then
+            echo -e "${RED}No baseline for ${FIRMWARE_NAME} secondary #${sec_idx}.${END} Run with --update to create $sec_old"
+            failures=$((failures+1))
+        elif "$SCRIPT_DIR/compare_json.py" "$sec_old" "$sec_new" --exclude '\.extracted($|/)' \
+                "${CRITICAL_PATTERNS[@]}" --verbose; then
+            echo -e "${GREEN}Secondary #${sec_idx} contents match for ${FIRMWARE_NAME}.${END}"
+        else
+            echo -e "${RED}Secondary #${sec_idx} for ${FIRMWARE_NAME} does not match.${END} To approve changes replace ${sec_old} with ${sec_new}"
+            failures=$((failures+1))
+        fi
+    done
 }
 
 # Test function that uses default output naming (no --output flag)
@@ -242,7 +300,7 @@ download_file() {
     done
 }
 
-# Firmware table: name|filename|display name|extractors|timeout(optional)|url
+# Firmware table: name|filename|display name|extractors|timeout(optional)|extra flags(optional)|url
 # Notes on individual entries:
 #   - google_wifi: large (~68 MB) ChromeOS image; unblob can need well over the
 #     default 120s, so it gets extra headroom to avoid a flaky "no extractor
@@ -255,16 +313,21 @@ download_file() {
 #     extracted via unblob's debugfs `rdump` handler; before the fix that path
 #     reported every file/dir as 0700, so a regression shows as a `mode` diff.
 #     Pinned to a release so the baseline stays stable.
+#   - google_wifi_multi: same ChromeOS image re-run with --primary-limit 2 —
+#     its A/B partition scheme carries two full root filesystems, exercising
+#     the secondary-filesystem output (issue #70) on real firmware. The
+#     download is shared with google_wifi via the common filename.
 FIRMWARE_TABLE=(
-    "ax1800|ax1800_firmware.zip|AX1800|binwalk,unblob||https://static.tp-link.com/upload/firmware/2023/202308/20230818/Archer%20AX1800(US)_V4.6_230725.zip"
-    "rb750gr3|rb750gr3_firmware.npk|RB750Gr3|unblob||https://download.mikrotik.com/routeros/7.14.3/routeros-7.14.3-mmips.npk"
-    "ax86u|ax86u_firmware.zip|RT-AX86U Pro|binwalk,unblob||https://dlcdnets.asus.com/pub/ASUS/wireless/RT-AX86U_Pro/FW_RT_AX86U_PRO_300610234312.zip?model=RT-AX86U%20Pro"
-    "ac2600|dlink_ac2600_firmware.zip|D-Link AC2600|binwalk,unblob||https://support.dlink.com/resource/PRODUCTS/DIR-882/REVA/DIR-882_REVA_FIRMWARE_v1.30B06.zip"
-    "linksys_ax3200|linksys_ax3200.img|Linksys AX3200|unblob,binwalk||https://downloads.linksys.com/support/assets/firmware/FW_E8450_1.1.01.272918_PROD_unsigned.img"
-    "google_wifi|google_wifi.zip|Google WiFi|unblob,binwalk|360|https://dl.google.com/dl/edgedl/chromeos/recovery/chromeos_9334.41.3_gale_recovery_stable-channel_mp.bin.zip"
-    "tl_wr841n|tl_wr841n.zip|TL-WR841N|unblob,binwalk||https://static.tp-link.com/2018/201804/20180403/TL-WR841N(EU)_V14_180319.zip"
-    "openwrt_x86_64|openwrt_x86_64_ext4.img.gz|OpenWrt x86-64 ext4|unblob||https://downloads.openwrt.org/releases/23.05.5/targets/x86/64/openwrt-23.05.5-x86-64-generic-ext4-combined.img.gz"
-    "rax54s|RAX54Sv2-V1.1.4.28.zip|RAX54S|binwalk||https://www.downloads.netgear.com/files/GDC/RAX54S/RAX54Sv2-V1.1.4.28.zip"
+    "ax1800|ax1800_firmware.zip|AX1800|binwalk,unblob|||https://static.tp-link.com/upload/firmware/2023/202308/20230818/Archer%20AX1800(US)_V4.6_230725.zip"
+    "rb750gr3|rb750gr3_firmware.npk|RB750Gr3|unblob|||https://download.mikrotik.com/routeros/7.14.3/routeros-7.14.3-mmips.npk"
+    "ax86u|ax86u_firmware.zip|RT-AX86U Pro|binwalk,unblob|||https://dlcdnets.asus.com/pub/ASUS/wireless/RT-AX86U_Pro/FW_RT_AX86U_PRO_300610234312.zip?model=RT-AX86U%20Pro"
+    "ac2600|dlink_ac2600_firmware.zip|D-Link AC2600|binwalk,unblob|||https://support.dlink.com/resource/PRODUCTS/DIR-882/REVA/DIR-882_REVA_FIRMWARE_v1.30B06.zip"
+    "linksys_ax3200|linksys_ax3200.img|Linksys AX3200|unblob,binwalk|||https://downloads.linksys.com/support/assets/firmware/FW_E8450_1.1.01.272918_PROD_unsigned.img"
+    "google_wifi|google_wifi.zip|Google WiFi|unblob,binwalk|360||https://dl.google.com/dl/edgedl/chromeos/recovery/chromeos_9334.41.3_gale_recovery_stable-channel_mp.bin.zip"
+    "google_wifi_multi|google_wifi.zip|Google WiFi (multi-fs)|unblob|360|--primary-limit 2|https://dl.google.com/dl/edgedl/chromeos/recovery/chromeos_9334.41.3_gale_recovery_stable-channel_mp.bin.zip"
+    "tl_wr841n|tl_wr841n.zip|TL-WR841N|unblob,binwalk|||https://static.tp-link.com/2018/201804/20180403/TL-WR841N(EU)_V14_180319.zip"
+    "openwrt_x86_64|openwrt_x86_64_ext4.img.gz|OpenWrt x86-64 ext4|unblob|||https://downloads.openwrt.org/releases/23.05.5/targets/x86/64/openwrt-23.05.5-x86-64-generic-ext4-combined.img.gz"
+    "rax54s|RAX54Sv2-V1.1.4.28.zip|RAX54S|binwalk|||https://www.downloads.netgear.com/files/GDC/RAX54S/RAX54Sv2-V1.1.4.28.zip"
 )
 
 table_row() {  # <name> -> echoes the row, or fails
@@ -289,8 +352,8 @@ for name in ${SELECTED[@]+"${SELECTED[@]}"}; do
 done
 
 run_firmware() {  # <table row>
-    local name filename display extractors timeout url
-    IFS='|' read -r name filename display extractors timeout url <<<"$1"
+    local name filename display extractors timeout flags url
+    IFS='|' read -r name filename display extractors timeout flags url <<<"$1"
 
     FIRMWARE_PATH="$TMP_DIR/$filename"
     echo "Downloading $display firmware to: $FIRMWARE_PATH"
@@ -303,7 +366,7 @@ run_firmware() {  # <table row>
         exit 1
     fi
 
-    test "$FIRMWARE_PATH" "$name" "$display" "$extractors" ${timeout:+"$timeout"}
+    test "$FIRMWARE_PATH" "$name" "$display" "$extractors" "${timeout:-120}" "$flags"
 }
 
 for row in "${FIRMWARE_TABLE[@]}"; do

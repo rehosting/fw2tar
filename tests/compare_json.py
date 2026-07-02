@@ -114,10 +114,31 @@ def normalize_json_paths(json_data: Dict[str, Any]) -> Dict[str, Any]:
     return normalized
 
 
+def is_critical(path: str, diffs: List[str],
+                critical_patterns: List[str]) -> bool:
+    """A difference is critical when the path matches a critical pattern, or
+    when the diff kind is one that breaks rehosting regardless of location:
+    mode changes (permissions, incl. suid/sgid) and symlink-target changes."""
+    if any(re.search(p, path) for p in critical_patterns):
+        return True
+    return any(d.startswith(('Mode:', 'Link target:', 'Type:')) for d in diffs)
+
+
 def compare_json_contents(json1: Dict[str, Any],
-                          json2: Dict[str, Any]) -> tuple:
-    """Compare two JSON content dictionaries."""
+                          json2: Dict[str, Any],
+                          critical_patterns: List[str] | None = None) -> tuple:
+    """Compare two JSON content dictionaries.
+
+    Returns (matches, differences, n_critical, n_drift). When
+    critical_patterns is given, differences are split into a CRITICAL tier
+    (rootfs-viability paths, and mode/type/symlink changes anywhere) and a
+    "drift" tier (everything else), so a wall of benign extractor drift can't
+    bury the one diff that matters.
+    """
+    critical_patterns = critical_patterns or []
     differences = []
+    n_critical = 0
+    n_drift = 0
 
     # Normalize paths for consistent comparison
     norm_json1 = normalize_json_paths(json1)
@@ -127,15 +148,31 @@ def compare_json_contents(json1: Dict[str, Any],
     paths1 = set(norm_json1.keys())
     paths2 = set(norm_json2.keys())
 
-    # Files only in first JSON
-    only_in_first = paths1 - paths2
-    if only_in_first:
-        differences.append(f"Files only in first: {sorted(only_in_first)}")
+    def tier_of(path: str, diffs: List[str]) -> str:
+        nonlocal n_critical, n_drift
+        if critical_patterns and is_critical(path, diffs, critical_patterns):
+            n_critical += 1
+            return 'CRITICAL'
+        n_drift += 1
+        return 'drift'
 
-    # Files only in second JSON
-    only_in_second = paths2 - paths1
-    if only_in_second:
-        differences.append(f"Files only in second: {sorted(only_in_second)}")
+    # Presence differences: critical when the path matches a critical pattern.
+    for label, only in (('first', paths1 - paths2), ('second', paths2 - paths1)):
+        if not only:
+            continue
+        if critical_patterns:
+            crit = sorted(p for p in only
+                          if any(re.search(pat, p) for pat in critical_patterns))
+            drift = sorted(p for p in only if p not in set(crit))
+            n_critical += len(crit)
+            n_drift += len(drift)
+            if crit:
+                differences.append(f"[CRITICAL] Files only in {label}: {crit}")
+            if drift:
+                differences.append(f"[drift] Files only in {label}: {drift}")
+        else:
+            n_drift += len(only)
+            differences.append(f"Files only in {label}: {sorted(only)}")
 
     # Compare common files
     common_paths = paths1 & paths2
@@ -150,11 +187,15 @@ def compare_json_contents(json1: Dict[str, Any],
     if file_differences:
         differences.append("File differences:")
         for path, diffs in file_differences.items():
-            differences.append(f"  {path}:")
+            if critical_patterns:
+                differences.append(f"  [{tier_of(path, diffs)}] {path}:")
+            else:
+                n_drift += 1
+                differences.append(f"  {path}:")
             for diff in diffs:
                 differences.append(f"    - {diff}")
 
-    return len(differences) == 0, differences
+    return len(differences) == 0, differences, n_critical, n_drift
 
 
 def main():
@@ -169,6 +210,15 @@ def main():
     parser.add_argument('--exclude', '-e', action='append', default=[],
                         help='Regex pattern to exclude paths from comparison '
                              '(can be used multiple times)')
+    parser.add_argument('--critical', '-c', action='append', default=[],
+                        help='Regex pattern marking paths whose differences '
+                             'are CRITICAL (can be used multiple times). '
+                             'Mode/type/symlink-target changes are critical '
+                             'on any path when this tiering is enabled.')
+    parser.add_argument('--fail-on', choices=['any', 'critical'],
+                        default='any',
+                        help='Exit non-zero on any difference (default), or '
+                             'only when a CRITICAL difference is found')
 
     args = parser.parse_args()
 
@@ -208,17 +258,23 @@ def main():
                   f"{len(contents2)} entries")
 
     # Compare contents
-    matches, differences = compare_json_contents(contents1, contents2)
+    matches, differences, n_critical, n_drift = compare_json_contents(
+        contents1, contents2, args.critical)
+
+    failed = (not matches) if args.fail_on == 'any' else (n_critical > 0)
 
     # Output results
     if args.json:
         result = {
             'matches': matches,
             'differences': differences,
+            'critical_count': n_critical,
+            'drift_count': n_drift,
             'first_file_count': len(contents1),
             'second_file_count': len(contents2)
         }
         print(json.dumps(result, indent=2))
+        sys.exit(1 if failed else 0)
     else:
         if matches:
             print("Contents match!")
@@ -227,7 +283,10 @@ def main():
             print("Contents differ:")
             for diff in differences:
                 print(f"{diff}")
-            sys.exit(1)
+            if args.critical:
+                print(f"Summary: {n_critical} critical, "
+                      f"{n_drift} drift difference(s)")
+            sys.exit(1 if failed else 0)
 
 
 if __name__ == '__main__':
