@@ -157,6 +157,83 @@ else
 fi
 
 # ---------------------------------------------------------------------------
+echo "[5] error paths: exit codes and no stray outputs"
+# ---------------------------------------------------------------------------
+# Fatal argument/setup errors exit 1 (src/error.rs); a run where no extractor
+# finds a Linux filesystem exits 2 with "No extractor succeeded."
+# (src/main.rs). Consumers script against these, so assert the real codes,
+# not just the messages.
+run_fw2tar() {  # <args...> -> captures combined output; returns fw2tar's rc
+    docker run --rm -u "$UID_GID" -v "$WORK:/work" "$IMAGE" \
+        fakeroot_fw2tar "$@" 2>&1
+}
+
+out="$(run_fw2tar /work/does_not_exist.bin)"; rc=$?
+if [ "$rc" -eq 1 ] && [[ "$out" == *"does not exist"* ]]; then
+    ok "nonexistent firmware: exit 1 with clear message"
+else
+    bad "nonexistent firmware: rc=$rc" "$out"
+fi
+
+mkdir -p "$WORK/a_directory"
+out="$(run_fw2tar /work/a_directory)"; rc=$?
+if [ "$rc" -eq 1 ] && [[ "$out" == *"is not a file"* ]]; then
+    ok "directory as firmware: exit 1 with clear message"
+else
+    bad "directory as firmware: rc=$rc" "$out"
+fi
+
+# --force so the pre-existing [4] output doesn't short-circuit before the
+# extractor-name validation we're testing.
+out="$(run_fw2tar --force --extractors bogus /work/fw.squashfs)"; rc=$?
+if [ "$rc" -eq 1 ] && [[ "$out" == *"Invalid extractor"* ]]; then
+    ok "invalid extractor name: exit 1 with clear message"
+else
+    bad "invalid extractor name: rc=$rc" "$out"
+fi
+
+# Unextractable inputs: exit 2, and no archive may be left behind (per-extractor
+# logs are kept on failure as diagnostics; that's expected).
+mkdir -p "$WORK/err"
+: > "$WORK/err/empty.bin"
+head -c 1024 /dev/urandom > "$WORK/err/garbage.bin"
+for f in empty.bin garbage.bin; do
+    out="$(run_fw2tar --timeout 60 "/work/err/$f")"; rc=$?
+    if [ "$rc" -eq 2 ] && [[ "$out" == *"No extractor succeeded."* ]]; then
+        ok "$f: exit 2, no extractor succeeded"
+    else
+        bad "$f: rc=$rc" "$out"
+    fi
+done
+strays="$(find "$WORK/err" -name '*.tar.gz' -o -name '*.rootfs.tar.gz' -o -name '*.manifest.json' | sort)"
+if [ -z "$strays" ]; then
+    ok "failed runs left no archives or manifests behind"
+else
+    bad "failed runs left stray outputs" "$strays"
+fi
+
+# Pre-existing output: refused (and untouched) without --force, replaced with it.
+# fw.squashfs is the real fixture built in [4].
+mkdir -p "$WORK/force"
+cp "$WORK/fw.squashfs" "$WORK/force/fw.squashfs"
+echo "sentinel, not a real archive" > "$WORK/force/fw.rootfs.tar.gz"
+before="$(cksum < "$WORK/force/fw.rootfs.tar.gz")"
+out="$(run_fw2tar /work/force/fw.squashfs)"; rc=$?
+after="$(cksum < "$WORK/force/fw.rootfs.tar.gz")"
+if [ "$rc" -eq 1 ] && [[ "$out" == *"already exists"* ]] && [ "$before" = "$after" ]; then
+    ok "existing output without --force: exit 1, file untouched"
+else
+    bad "existing output without --force: rc=$rc (untouched: $([ "$before" = "$after" ] && echo yes || echo NO))" "$out"
+fi
+out="$(run_fw2tar --force /work/force/fw.squashfs)"; rc=$?
+after="$(cksum < "$WORK/force/fw.rootfs.tar.gz")"
+if [ "$rc" -eq 0 ] && [ "$before" != "$after" ]; then
+    ok "existing output with --force: overwritten, exit 0"
+else
+    bad "existing output with --force: rc=$rc" "$out"
+fi
+
+# ---------------------------------------------------------------------------
 echo
 echo "container interface: $pass passed, $fail failed"
 [ "$fail" -eq 0 ] || exit 1
