@@ -139,6 +139,25 @@ build_squashfs_in_ext4() {  # inner squashfs, wrapped in an outer ext4
     echo "built $OUT/rootfs.sqfs_in_ext4"
 }
 
+build_two_squashfs_in_tar() {  # TWO inner squashfs rootfs, wrapped in an outer tar
+    # Exercises --primary-limit > 1: firmware that splits its rootfs across
+    # several filesystem images (e.g. a main image plus an /opt image). The
+    # second tree drops a few executables so the candidate ranking (file node
+    # count) is deterministic: rootfs_a wins as primary, rootfs_b is the
+    # secondary. Used by tests/contract/run.sh, not the behavior matrix.
+    rm -f "$OUT/rootfs.two_sqfs_in_tar"
+    local stage="$TMP/two_sqfs_in_tar"
+    rm -rf "$stage"; mkdir -p "$stage"
+    mksquashfs "$ROOT" "$stage/rootfs_a.squashfs" -noappend -no-progress >/dev/null
+    local root_b="$TMP/two_sqfs_root_b"
+    rm -rf "$root_b"
+    cp -a "$ROOT" "$root_b"
+    rm -f "$root_b"/usr/bin/prog9 "$root_b"/usr/bin/prog10 "$root_b"/usr/bin/prog11
+    mksquashfs "$root_b" "$stage/rootfs_b.squashfs" -noappend -no-progress >/dev/null
+    tar --numeric-owner -C "$stage" -cf "$OUT/rootfs.two_sqfs_in_tar" .
+    echo "built $OUT/rootfs.two_sqfs_in_tar"
+}
+
 build_ext4_in_tar() {  # inner ext4, wrapped in an outer tar
     rm -f "$OUT/rootfs.ext4_in_tar"
     local stage="$TMP/ext4_in_tar"
@@ -152,6 +171,7 @@ for t in "${TYPES[@]}"; do
     case "$t" in
         ext2|ext3|ext4) build_extfs "$t" ;;
         squashfs_in_ext4) build_squashfs_in_ext4 ;;
+        two_squashfs_in_tar) build_two_squashfs_in_tar ;;
         ext4_in_tar)      build_ext4_in_tar ;;
         squashfs) build_squashfs ;;
         cramfs)   build_cramfs ;;
