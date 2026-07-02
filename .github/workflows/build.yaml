@@ -93,3 +93,52 @@ jobs:
           NO_BUILD: "1"
           FW2TAR_IMAGE: rehosting/fw2tar-test:latest
         run: ./tests/contract/run.sh
+
+  # Real-firmware smoke: two small images (TL-WR841N ~4 MB, RB750Gr3 NPK)
+  # through the full pipeline with baseline comparison, so an extraction
+  # regression is caught on the PR instead of sitting until the next release
+  # nightly. The full 9-firmware sweep stays in nightly.yaml.
+  e2e-smoke:
+    runs-on: rehosting-arc
+    env:
+      USER: runner
+      LOGNAME: runner
+      TMPDIR: /home/runner/_work/_temp
+      XDG_CACHE_HOME: /home/runner/_work/.cache
+    steps:
+      - uses: actions/checkout@v4
+      - name: Prepare runner directories
+        run: mkdir -p "$TMPDIR" "$XDG_CACHE_HOME"
+      - name: Require Cachix token (internal runs)
+        if: ${{ github.event.pull_request.head.repo.full_name == github.repository }}
+        env:
+          CACHIX_REHOSTING: ${{ secrets.CACHIX_REHOSTING }}
+        run: |
+          [ -n "$CACHIX_REHOSTING" ] || {
+            echo "::error::CACHIX_REHOSTING secret is not set; Nix builds would run uncached"; exit 1; }
+      - name: Set up Nix
+        uses: rehosting/ci/actions/nix-setup@v1
+        with:
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+          cache-backend: cachix
+          cachix-name: rehosting-tools
+          cachix-auth-token: ${{ secrets.CACHIX_REHOSTING }}
+          # No VM needed; avoids the KVM/udevadm step that fails on Arc pods
+          # which expose /dev/kvm without a working udevd.
+          enable-kvm: false
+      - name: Cache firmware downloads
+        uses: actions/cache@v4
+        with:
+          path: tests/tmp_downloads
+          key: firmware-downloads-${{ hashFiles('tests/end_to_end.sh') }}
+          restore-keys: |
+            firmware-downloads-
+      - name: Build + load production image
+        run: |
+          nix build -L .#dockerImage
+          docker load < result
+      - name: End-to-end smoke (small real firmware)
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          FW2TAR_IMAGE: rehosting/fw2tar:latest
+        run: ./tests/end_to_end.sh tl_wr841n rb750gr3
