@@ -3,6 +3,7 @@
 failures=0
 DEBUG=${DEBUG:-false}
 UPDATE_MODE=false
+SELECTED=()
 
 # Parse command line arguments
 while [[ $# -gt 0 ]]; do
@@ -16,16 +17,23 @@ while [[ $# -gt 0 ]]; do
             shift
             ;;
         --help|-h)
-            echo "Usage: $0 [--update] [--debug] [--help]"
+            echo "Usage: $0 [--update] [--debug] [--help] [firmware ...]"
             echo "  --update    Update baseline JSON files instead of comparing"
             echo "  --debug     Enable debug output"
             echo "  --help      Show this help message"
+            echo "  firmware    Names to run (default: all). Known names:"
+            echo "              ax1800 rb750gr3 ax86u ac2600 linksys_ax3200"
+            echo "              google_wifi tl_wr841n openwrt_x86_64 rax54s"
             exit 0
             ;;
-        *)
+        -*)
             echo "Unknown option: $1"
             echo "Use --help for usage information"
             exit 1
+            ;;
+        *)
+            SELECTED+=("$1")
+            shift
             ;;
     esac
 done
@@ -234,90 +242,73 @@ download_file() {
     done
 }
 
-# Download TP-Link AX1800 Firmware
-FIRMWARE_PATH="$TMP_DIR/ax1800_firmware.zip"
+# Firmware table: name|filename|display name|extractors|timeout(optional)|url
+# Notes on individual entries:
+#   - google_wifi: large (~68 MB) ChromeOS image; unblob can need well over the
+#     default 120s, so it gets extra headroom to avoid a flaky "no extractor
+#     succeeded" on a slow runner.
+#   - tl_wr841n: regression guard for issue #35 (stopped extracting after
+#     f44361d4; the unblob 26.6.4 rebase restored it — a real busybox rootfs
+#     with all key dirs/critical files).
+#   - openwrt_x86_64: regression guard for #52 (ext permissions). An
+#     MBR-partitioned disk image whose rootfs is a real ext4 filesystem,
+#     extracted via unblob's debugfs `rdump` handler; before the fix that path
+#     reported every file/dir as 0700, so a regression shows as a `mode` diff.
+#     Pinned to a release so the baseline stays stable.
+FIRMWARE_TABLE=(
+    "ax1800|ax1800_firmware.zip|AX1800|binwalk,unblob||https://static.tp-link.com/upload/firmware/2023/202308/20230818/Archer%20AX1800(US)_V4.6_230725.zip"
+    "rb750gr3|rb750gr3_firmware.npk|RB750Gr3|unblob||https://download.mikrotik.com/routeros/7.14.3/routeros-7.14.3-mmips.npk"
+    "ax86u|ax86u_firmware.zip|RT-AX86U Pro|binwalk,unblob||https://dlcdnets.asus.com/pub/ASUS/wireless/RT-AX86U_Pro/FW_RT_AX86U_PRO_300610234312.zip?model=RT-AX86U%20Pro"
+    "ac2600|dlink_ac2600_firmware.zip|D-Link AC2600|binwalk,unblob||https://support.dlink.com/resource/PRODUCTS/DIR-882/REVA/DIR-882_REVA_FIRMWARE_v1.30B06.zip"
+    "linksys_ax3200|linksys_ax3200.img|Linksys AX3200|unblob,binwalk||https://downloads.linksys.com/support/assets/firmware/FW_E8450_1.1.01.272918_PROD_unsigned.img"
+    "google_wifi|google_wifi.zip|Google WiFi|unblob,binwalk|360|https://dl.google.com/dl/edgedl/chromeos/recovery/chromeos_9334.41.3_gale_recovery_stable-channel_mp.bin.zip"
+    "tl_wr841n|tl_wr841n.zip|TL-WR841N|unblob,binwalk||https://static.tp-link.com/2018/201804/20180403/TL-WR841N(EU)_V14_180319.zip"
+    "openwrt_x86_64|openwrt_x86_64_ext4.img.gz|OpenWrt x86-64 ext4|unblob||https://downloads.openwrt.org/releases/23.05.5/targets/x86/64/openwrt-23.05.5-x86-64-generic-ext4-combined.img.gz"
+    "rax54s|RAX54Sv2-V1.1.4.28.zip|RAX54S|binwalk||https://www.downloads.netgear.com/files/GDC/RAX54S/RAX54Sv2-V1.1.4.28.zip"
+)
 
-echo "Downloading AX1800 firmware to: $FIRMWARE_PATH"
-download_file "https://static.tp-link.com/upload/firmware/2023/202308/20230818/Archer%20AX1800(US)_V4.6_230725.zip" "$FIRMWARE_PATH"
+table_row() {  # <name> -> echoes the row, or fails
+    local row
+    for row in "${FIRMWARE_TABLE[@]}"; do
+        [ "${row%%|*}" = "$1" ] && { echo "$row"; return 0; }
+    done
+    return 1
+}
 
-# Verify the file was downloaded successfully
-if [ ! -f "$FIRMWARE_PATH" ]; then
-    echo -e "${RED}ERROR: Failed to download AX1800 firmware. File does not exist: $FIRMWARE_PATH${END}"
-    echo "Directory contents of $(dirname "$FIRMWARE_PATH"):"
-    ls -la "$(dirname "$FIRMWARE_PATH")" || echo "Directory does not exist"
-    exit 1
-fi
+is_selected() {  # <name> -> true if no filter given or name was requested
+    [ ${#SELECTED[@]} -eq 0 ] && return 0
+    local n
+    for n in "${SELECTED[@]}"; do [ "$n" = "$1" ] && return 0; done
+    return 1
+}
 
-echo -e "${GREEN}✓ AX1800 firmware downloaded successfully: $(ls -lh "$FIRMWARE_PATH")${END}"
+# Validate requested names up front so a typo fails fast, not after downloads.
+for name in ${SELECTED[@]+"${SELECTED[@]}"}; do
+    table_row "$name" >/dev/null || {
+        echo -e "${RED}Unknown firmware name: $name${END} (see --help)"; exit 1; }
+done
 
-test "$FIRMWARE_PATH" "ax1800" "AX1800" "binwalk,unblob"
+run_firmware() {  # <table row>
+    local name filename display extractors timeout url
+    IFS='|' read -r name filename display extractors timeout url <<<"$1"
 
-# Download Mikrotik RB750Gr3 firmware
-FIRMWARE_PATH="$TMP_DIR/rb750gr3_firmware.npk"
+    FIRMWARE_PATH="$TMP_DIR/$filename"
+    echo "Downloading $display firmware to: $FIRMWARE_PATH"
+    download_file "$url" "$FIRMWARE_PATH"
 
-download_file "https://download.mikrotik.com/routeros/7.14.3/routeros-7.14.3-mmips.npk" "$FIRMWARE_PATH"
+    if [ ! -f "$FIRMWARE_PATH" ]; then
+        echo -e "${RED}ERROR: Failed to download $display firmware. File does not exist: $FIRMWARE_PATH${END}"
+        echo "Directory contents of $(dirname "$FIRMWARE_PATH"):"
+        ls -la "$(dirname "$FIRMWARE_PATH")" || echo "Directory does not exist"
+        exit 1
+    fi
 
-test "$FIRMWARE_PATH" "rb750gr3" "RB750Gr3" "unblob"
+    test "$FIRMWARE_PATH" "$name" "$display" "$extractors" ${timeout:+"$timeout"}
+}
 
-# Download ASUS RT-AX86U Pro firmware
-
-FIRMWARE_PATH="$TMP_DIR/ax86u_firmware.zip"
-
-download_file "https://dlcdnets.asus.com/pub/ASUS/wireless/RT-AX86U_Pro/FW_RT_AX86U_PRO_300610234312.zip?model=RT-AX86U%20Pro" "$FIRMWARE_PATH"
-
-test "$FIRMWARE_PATH" "ax86u" "RT-AX86U Pro" "binwalk,unblob"
-
-# Download D-Link AC2600 firmware
-FIRMWARE_PATH="$TMP_DIR/dlink_ac2600_firmware.zip"
-download_file "https://support.dlink.com/resource/PRODUCTS/DIR-882/REVA/DIR-882_REVA_FIRMWARE_v1.30B06.zip" "$FIRMWARE_PATH"
-
-test "$FIRMWARE_PATH" "ac2600" "D-Link AC2600" "binwalk,unblob"
-
-# Download Linksys AX3200
-FIRMWARE_PATH="$TMP_DIR/linksys_ax3200.img"
-
-download_file "https://downloads.linksys.com/support/assets/firmware/FW_E8450_1.1.01.272918_PROD_unsigned.img" "$FIRMWARE_PATH"
-
-test "$FIRMWARE_PATH" "linksys_ax3200" "Linksys AX3200" "unblob,binwalk"
-
-# Download Google WiFi Gale
-FIRMWARE_PATH="$TMP_DIR/google_wifi.zip"
-
-download_file "https://dl.google.com/dl/edgedl/chromeos/recovery/chromeos_9334.41.3_gale_recovery_stable-channel_mp.bin.zip" "$FIRMWARE_PATH"
-
-# Google WiFi is a large (~68 MB) ChromeOS image; unblob (the chosen extractor)
-# can need well over the default 120s, so give it more headroom to avoid a flaky
-# "no extractor succeeded" when a runner is slow.
-test "$FIRMWARE_PATH" "google_wifi" "Google WiFi" "unblob,binwalk" 360
-
-# Download TP-Link TL-WR841N (EU) V14 — regression guard for issue #35
-# (this image stopped extracting after f44361d4; the unblob 26.6.4 rebase
-# restored it — a real busybox rootfs with all key dirs/critical files).
-FIRMWARE_PATH="$TMP_DIR/tl_wr841n.zip"
-
-download_file "https://static.tp-link.com/2018/201804/20180403/TL-WR841N(EU)_V14_180319.zip" "$FIRMWARE_PATH"
-
-test "$FIRMWARE_PATH" "tl_wr841n" "TL-WR841N" "unblob,binwalk"
-
-# Download OpenWrt x86-64 ext4 combined disk image — regression guard for #52
-# (ext permissions). This is the original collapse path: an MBR-partitioned
-# disk image whose rootfs is a real ext4 filesystem, extracted via unblob's
-# debugfs `rdump` handler. Before the fix that path reported every file/dir as
-# 0700; the committed baseline captures the real source modes, so a regression
-# in the ext mode handling shows up as a `mode` diff here. Pinned to a release
-# so the baseline stays stable.
-FIRMWARE_PATH="$TMP_DIR/openwrt_x86_64_ext4.img.gz"
-
-download_file "https://downloads.openwrt.org/releases/23.05.5/targets/x86/64/openwrt-23.05.5-x86-64-generic-ext4-combined.img.gz" "$FIRMWARE_PATH"
-
-test "$FIRMWARE_PATH" "openwrt_x86_64" "OpenWrt x86-64 ext4" "unblob"
-
-# Download NETGEAR AX5400 (RAX54S) firmware
-FIRMWARE_PATH="$TMP_DIR/RAX54Sv2-V1.1.4.28.zip"
-
-download_file "https://www.downloads.netgear.com/files/GDC/RAX54S/RAX54Sv2-V1.1.4.28.zip" "$FIRMWARE_PATH"
-
-test "$FIRMWARE_PATH" "rax54s" "RAX54S" "binwalk"
+for row in "${FIRMWARE_TABLE[@]}"; do
+    is_selected "${row%%|*}" && run_firmware "$row"
+done
 
 if [[ "$failures" -gt 0 ]]; then
     echo "Saw $failures during test"
@@ -325,22 +316,23 @@ if [[ "$failures" -gt 0 ]]; then
     exit 1
 fi
 
-# Test default filename behavior (version number preservation)
-# Use the RAX54S firmware which has version numbers in the filename
-echo "Testing default filename behavior with version numbers..."
+# Test default filename behavior (version number preservation) using the RAX54S
+# firmware, which has version numbers in its filename: RAX54Sv2-V1.1.4.28.zip
+# should produce RAX54Sv2-V1.1.4.28.rootfs.tar.gz. Runs only when rax54s is in
+# the selection (it needs that download).
+if is_selected "rax54s"; then
+    echo "Testing default filename behavior with version numbers..."
+    FIRMWARE_PATH="$TMP_DIR/RAX54Sv2-V1.1.4.28.zip"
+    test_default_naming "$FIRMWARE_PATH" "rax54s" "RAX54S Default Naming" "binwalk"
 
-# Use the already-downloaded RAX54S firmware: RAX54Sv2-V1.1.4.28.zip
-# This should produce: RAX54Sv2-V1.1.4.28.rootfs.tar.gz (preserving version numbers)
-test_default_naming "$FIRMWARE_PATH" "rax54s" "RAX54S Default Naming" "binwalk"
-
-# Verify the output filename contains the version numbers
-EXPECTED_OUTPUT="$TMP_DIR/RAX54Sv2-V1.1.4.28.rootfs.tar.gz"
-if [ -f "$EXPECTED_OUTPUT" ]; then
-    echo -e "${GREEN}✓ Version numbers preserved in default naming: $(basename "$EXPECTED_OUTPUT")${END}"
-    rm -f "$EXPECTED_OUTPUT"
-else
-    echo -e "${RED}✗ Version numbers NOT preserved in default naming - expected: $(basename "$EXPECTED_OUTPUT")${END}"
-    failures=$((failures+1))
+    EXPECTED_OUTPUT="$TMP_DIR/RAX54Sv2-V1.1.4.28.rootfs.tar.gz"
+    if [ -f "$EXPECTED_OUTPUT" ]; then
+        echo -e "${GREEN}✓ Version numbers preserved in default naming: $(basename "$EXPECTED_OUTPUT")${END}"
+        rm -f "$EXPECTED_OUTPUT"
+    else
+        echo -e "${RED}✗ Version numbers NOT preserved in default naming - expected: $(basename "$EXPECTED_OUTPUT")${END}"
+        failures=$((failures+1))
+    fi
 fi
 
 if [[ "$failures" -gt 0 ]]; then
